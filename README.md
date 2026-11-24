@@ -21,11 +21,11 @@ GROWTH_DEMO=1 RUN_BOT=0 python dashboard.py
 
 Open http://localhost:8000 and choose **Demo do‘konni ochish / Открыть демомагазин**. Each demo session starts with its own workspace. Email/password sign-up and login use Supabase Auth. Email confirmation follows the development project's Auth settings. The demo has a separate signed browser session, a template-based poster, a simulated Telegram conversation and test billing. Demo sessions last 24 hours.
 
-For a Supabase project, apply each migration **once**, in filename order, with Supabase migrations or SQL Editor. The first creates the private `growth` schema, its row-level policies and the private `growth-private` bucket. The second creates a compatibility schema for new installations of the original bot. Existing installations continue to resolve legacy tables with their existing search path. For a fresh legacy installation, set the legacy DB user's search path to `growth_legacy,public` and grant it access to that schema. The new workspace has its own journal. Importing historical legacy transactions is outside this pilot.
+For a Supabase project, apply each migration **once**, in filename order, with Supabase migrations or SQL Editor. The first creates the private `growth` schema, its row-level policies and the private `growth-private` bucket. The compatibility migration creates a compatibility schema for new installations of the original bot. Existing installations continue to resolve legacy tables with their existing search path. For a fresh legacy installation, set the legacy DB user's search path to `growth_legacy,public` and grant it access to that schema. The new workspace has its own journal. Importing historical legacy transactions is outside this pilot.
 
 ## Deployment
 
-Deploy the `web-mvp` branch as one persistent Railway service. The service builds with pip and starts `python dashboard.py`. Use one replica, health check `/health`, HTTPS and disabled sleeping. Set `COOKIE_SECURE=1`. Keep the existing Render deployment on its current branch and token. The original Render free plan can sleep.
+Deploy the `web-mvp` branch as one persistent Railway service. The Dockerfile installs the pinned dependencies, includes a Cyrillic-capable font and starts `python dashboard.py`. Use one replica, health check `/health`, HTTPS and disabled sleeping. Set `COOKIE_SECURE=1`. Keep the existing Render deployment on its current branch and token. The original Render free plan can sleep.
 
 | Variable | Where and how it is used |
 | --- | --- |
@@ -41,7 +41,7 @@ Deploy the `web-mvp` branch as one persistent Railway service. The service build
 | STARTER_PRICE_UZS, STARTER_VISUAL_LIMIT | Defaults 48000 UZS per 30 days and 30 successful posts per calendar month. Free gets five in the Asia/Tashkent calendar month. |
 | GROWTH_ADMIN_DATABASE_URL | Operator machine or restricted operator job only. Used to map a verified Telegram account or record a merchant-verified pilot activation. |
 
-Use a non-owner, non-superuser runtime login with `NOBYPASSRLS`. Do not expose the `growth` schema through the public Data API. The authenticated web server selects memberships, enforces roles, and sets the PostgreSQL scope inside each request transaction. The pilot runtime requires schema usage, table reads, inserts into workspace tables, updates to shop/profile/expiry, catalog, FAQ, chat, topic, connection and invoice records, and deletes on invites and members. Keep legacy-schema privileges separate.
+After migrations, apply the exact grants with the psql command in `ops/runtime_grants.sql`. Use a non-owner, non-superuser runtime login with `NOBYPASSRLS`. Do not expose the `growth` schema through the public Data API. The authenticated web server selects memberships, enforces roles, and sets the PostgreSQL scope inside each request transaction. The pilot runtime requires schema usage, table reads, inserts into workspace tables, updates to shop/profile/expiry, catalog, FAQ, chat, topic, connection and invoice records, and deletes on invites and members. Keep legacy-schema privileges separate.
 
 ## First shop checklist
 
@@ -49,7 +49,7 @@ Use a non-owner, non-superuser runtime login with `NOBYPASSRLS`. Do not expose t
 2. Add a product with price, design choices, availability and lead time. Save an approved answer in each customer language. A price FAQ can use `{price}` when the customer's question names a product.
 3. Add a brand color or select a draft visual direction. Upload a private brand image if available.
 4. Create an order and enter the customer's Telegram chat ID as its customer identifier to enable matching. Confirm outstanding balances on the website.
-5. In BotFather enable Business Mode for the **test token**. Connect it from the test shop's Telegram Business settings and grant reply rights for test chats. Verify the connection ID and owner Telegram user ID out of band. Run the operator command below. A received connection event alone never enrolls a shop.
+5. In BotFather enable Business Mode for the **test token**. Connect it from the test shop's Telegram Business settings and grant reply rights for test chats. On the pilot service the connection event logs a pending ID and Telegram owner ID. Verify both with the shop owner. Settings shows the workspace ID. Run the operator command below. A received connection event alone never enrolls a shop.
 6. Use a second Telegram account to test price, delivery, a custom request, owner takeover, and a redacted payment screenshot. Confirm a receipt only after checking the actual bank account. Stop every local poller and repeat the customer question against the hosted service.
 7. For assisted demos, record attendance separately. For a paying pilot, issue a Starter invoice and verify the merchant transfer before activation. Test confirmations and demo traffic are excluded from sales.
 
@@ -66,9 +66,9 @@ Settings shows the saved profile, catalog FAQs, connection status and team contr
 | Time | Action and observable result |
 | --- | --- |
 | 0:00–0:25 | Open the demo shop. Save the profile. In Production add Medovik at 120,000 UZS. In Settings approve a pickup answer. |
-| 0:25–0:50 | In Inbox's labeled Telegram simulator ask the exact pickup question, then “Medovik narxi qancha?”. Edit the price and ask again. Ask for a custom design and observe the paused conversation. For the connected pilot, use the customer's real Telegram account. |
+| 0:25–0:50 | In Inbox's labeled Telegram simulator ask the exact pickup question, then “Medovik narxi qancha?”. Edit the price and ask again. Ask for a custom design and observe the paused conversation. For the connected pilot, create a signed-in shop named DEMO, then use the customer's real Telegram account. |
 | 0:50–1:25 | Create a 140,000 UZS order. Upload a redacted customer screenshot in Finances, or send it in the paused Telegram chat. Open the private image, enter 40,000 UZS and the date, link the order as a deposit, verify funds, and save. The balance becomes 100,000 UZS. Resend the same image and refresh. |
-| 1:25–1:45 | Open Marketing to see counted questions. Generate a product post and download its branded PNG. Demo output uses a template. |
+| 1:25–1:45 | Open Marketing to see counted questions. Generate a product post and download its branded PNG. Every shop can choose the branded template. Configured production shops can also select an AI photograph. |
 | 1:45–2:00 | Create a Starter test invoice in Billing and simulate payment. Early renewal adds 30 days from expiry. Shop income stays unchanged. |
 
 ## Verification
@@ -81,6 +81,10 @@ pip install pytest pytest-asyncio
 TEST_POSTGRES_URL=postgresql://USER@localhost:5432/postgres python -m pytest -q tests
 ```
 
+To verify the deployable image, run `docker build -t ai-growth-assistant:pilot .`. A build environment with a private CA can supply its CA bundle as the optional BuildKit secret `build_ca`.
+
 The integration suite uses real PostgreSQL transactions and RLS, isolated demo identities, synthetic receipt images, two simulated Telegram account IDs and test invoices. It exercises fresh catalog prices, approved answers, paused receipts, duplicate confirmations, manual finance, tenant and worker isolation, expiry, concurrent generation limits, private image access and OCR provider fixtures. A real Supabase email exchange, a two-account Telegram session, model inference and a merchant settlement require their respective integrations.
 
 Photo on sign-in: bakery photograph distributed through [Unsplash](https://images.unsplash.com/photo-1509440159596-0249088772ff).
+
+The pilot can also run from an official Python container with an immutable public commit archive. Set the Railway service start command to the command printed by `python ops/railway_release.py COMMIT_SHA`. This deployment route installs dependencies on each restart and requires outbound access to GitHub and PyPI. To roll forward or back, select the corresponding verified commit.

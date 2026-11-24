@@ -133,7 +133,7 @@ async def legacy():
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    return {"ok": bool(await db._pool.fetchval("select 1"))}
 
 
 @app.get("/favicon.ico", include_in_schema=False)

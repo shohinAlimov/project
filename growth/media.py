@@ -7,10 +7,11 @@ import json
 import os
 import textwrap
 from datetime import date
+from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
-from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+from PIL import Image, ImageColor, ImageDraw, ImageFont, UnidentifiedImageError
 
 MAX_BYTES = 8 * 1024 * 1024
 
@@ -44,15 +45,31 @@ def storage():
     ) + "/storage/v1/object/growth-private/", headers
 
 
-async def save_file(c, biz, data):
+async def save_file(c, biz, data, receipt=False):
     mime = image_type(data)
-    digest = hashlib.sha256(data).hexdigest()
+    original_hash = hashlib.sha256(data).hexdigest()
+    digest = original_hash
+    if receipt:
+        # Lossless re-encoding and metadata changes preserve the receipt identity.
+        # Different pixels remain separate drafts for explicit owner review.
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                checksum = hashlib.sha256(
+                    f"receipt-rgba:{img.width}x{img.height}:".encode()
+                )
+                checksum.update(img.convert("RGBA").tobytes())
+                digest = checksum.hexdigest()
+        except OSError:
+            raise HTTPException(415, "Unreadable image data")
     # Serialize matching hashes, including retries following a storage upload.
     await c.execute(
         "select pg_advisory_xact_lock(hashtextextended($1,0))", f"{biz}:{digest}"
     )
     found = await c.fetchval(
-        "select id from growth.files where business_id=$1 and digest=$2", biz, digest
+        "select id from growth.files where business_id=$1 and digest in ($2,$3) order by digest=$2 desc limit 1",
+        biz,
+        digest,
+        original_hash,
     )
     if found:
         return found
@@ -165,7 +182,7 @@ async def receipt_fields(data, kind, demo=False):
 
 
 async def receive(c, biz, data, kind, customer="", demo=False):
-    file_id = await save_file(c, biz, data)
+    file_id = await save_file(c, biz, data, receipt=True)
     existing = await c.fetchval(
         "select id from growth.receipts where business_id=$1 and file_id=$2",
         biz,
@@ -186,17 +203,17 @@ async def receive(c, biz, data, kind, customer="", demo=False):
 
 
 def font(size):
-    try:
-        return ImageFont.truetype("DejaVuSans.ttf", size)
-    except OSError:
-        return ImageFont.load_default(size=size)
+    return ImageFont.truetype(
+        str(Path(__file__).parent / "assets" / "DejaVuSans.ttf"), size
+    )
 
 
-async def poster(product, shop, brand_image=None):
+async def poster(product, shop, brand_image=None, template=False):
     profile = json.loads(shop["profile"])
     color = profile.get("color", "#286452")
     canvas = Image.new("RGB", (1024, 1024), color)
-    if not shop["demo"]:
+    use_template = template or shop["demo"]
+    if not use_template:
         prompt = f"Editorial product photograph, no text, no logos. Product: {product['name']}. Product details: {product['details']}. Brand palette: {color}. Tone: {profile.get('tone', '')}. Visual direction: {profile.get('logo', '')}."
         result = await openai(
             "images/generations",
@@ -212,7 +229,7 @@ async def poster(product, shop, brand_image=None):
         ).convert("RGB")
         canvas.paste(bg.resize((1024, 1024)), (0, 0))
     draw = ImageDraw.Draw(canvas)
-    if shop["demo"]:
+    if use_template:
         draw.ellipse((530, -230, 1200, 450), outline="#e9dcb4", width=8)
         draw.ellipse((612, -148, 1118, 358), outline="#e9dcb4", width=8)
     if brand_image:
@@ -220,7 +237,8 @@ async def poster(product, shop, brand_image=None):
         logo.thumbnail((160, 120))
         canvas.paste(logo, (54, 48), logo)
     draw.rectangle((0, 520, 1024, 1024), fill="#f8f5ec")
-    draw.text((54, 550), shop["name"][:45], font=font(32), fill=color)
+    accent = color if max(ImageColor.getrgb(color)) < 180 else "#172e29"
+    draw.text((54, 550), shop["name"][:45], font=font(32), fill=accent)
     title = textwrap.wrap(product["name"], width=23)[:3]
     draw.multiline_text(
         (50, 620), "\n".join(title), font=font(58), fill="#172e29", spacing=2
@@ -229,7 +247,7 @@ async def poster(product, shop, brand_image=None):
         (54, 915),
         f"{product['price']:,} UZS".replace(",", " "),
         font=font(43),
-        fill=color,
+        fill=accent,
     )
     out = io.BytesIO()
     canvas.save(out, format="PNG")

@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import secrets
+import asyncpg
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
@@ -92,6 +93,7 @@ async def state(req: Request):
             "profile": json.loads(row["profile"]),
             "id": biz,
             "role": role,
+            "image_ai": bool(os.getenv("OPENAI_API_KEY")) and not row["demo"],
         }
         s["products"] = [
             {**dict(r), "details": json.loads(r["details"])}
@@ -109,6 +111,16 @@ async def state(req: Request):
         ]
         if role in FINANCE:
             s["figures"] = await finance.figures(c, biz)
+            s["week_income"] = [
+                dict(r)
+                for r in await c.fetch(
+                    """select day::text as day,sum(amount)::bigint total from growth.journal
+                where business_id=$1 and kind='income' and day between
+                (now() at time zone 'Asia/Tashkent')::date-6 and (now() at time zone 'Asia/Tashkent')::date
+                group by day""",
+                    biz,
+                )
+            ]
             s["orders"] = [dict(r) for r in await finance.orders(c, biz)]
             s["journal"] = [
                 dict(r)
@@ -223,6 +235,26 @@ async def faq(req: Request, body: Faq):
         return {"ok": True}
 
 
+@router.put("/faqs/{faq_id}")
+async def edit_faq(req: Request, faq_id: UUID, body: Faq):
+    async with workspace(req, OWNER) as (c, biz, *_):
+        try:
+            found = await c.fetchval(
+                """update growth.faqs set question=$3,answer=$4,language=$5
+                where business_id=$1 and id=$2 returning id""",
+                biz,
+                faq_id,
+                body.question,
+                body.answer,
+                body.language,
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(409, "An answer for this question already exists")
+        if not found:
+            raise HTTPException(404)
+        return {"id": found}
+
+
 @router.post("/orders")
 async def order(req: Request, body: Order):
     async with workspace(req, FINANCE) as (c, biz, *_):
@@ -298,7 +330,7 @@ async def download(req: Request, file_id: UUID):
 async def pause(req: Request, chat_id: UUID, body: Pause):
     async with workspace(req, OWNER) as (c, biz, *_):
         if not await c.fetchval(
-            "update growth.chats set paused=$3 where business_id=$1 and id=$2 returning id",
+            "update growth.chats set paused=$3,summary=case when $3 then summary else '' end where business_id=$1 and id=$2 returning id",
             biz,
             chat_id,
             body.paused,
@@ -308,7 +340,7 @@ async def pause(req: Request, chat_id: UUID, body: Pause):
 
 
 @router.post("/visuals/{pid}")
-async def visual(req: Request, pid: UUID):
+async def visual(req: Request, pid: UUID, template: bool = False):
     async with workspace(req, MARKETING) as (c, biz, *_):
         # A failed vendor call or write rolls back the entire generation. The shop lock
         # also keeps renewals and five simultaneous requests on the same plan snapshot.
@@ -335,7 +367,7 @@ async def visual(req: Request, pid: UUID):
             raise HTTPException(429, "Monthly visual limit reached")
         asset = json.loads(shop["profile"]).get("asset")
         logo = (await media.read_file(c, biz, UUID(asset)))[0] if asset else None
-        data = await media.poster(product, shop, logo)
+        data = await media.poster(product, shop, logo, template)
         fid = await media.save_file(c, biz, data)
         await c.execute(
             "insert into growth.visuals(business_id,month,file_id) values($1,$2,$3)",
@@ -376,9 +408,15 @@ async def simulate(req: Request, iid: UUID):
 async def assistant(req: Request, body: Question, monthly: bool = False):
     async with workspace(req) as (c, biz, role, _):
         shop = await c.fetchrow(
-            "select language,demo from growth.shops where id=$1", biz
+            "select language,demo,profile from growth.shops where id=$1", biz
         )
-        data = {}
+        profile = json.loads(shop["profile"])
+        data = {
+            "business": {
+                k: profile.get(k)
+                for k in ("name", "description", "stage", "customers", "goals")
+            }
+        }
         if role in FINANCE:
             data["finances"] = await finance.figures(c, biz, monthly)
         if role in MARKETING:

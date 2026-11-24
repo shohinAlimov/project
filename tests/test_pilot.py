@@ -38,9 +38,12 @@ async def pilot(monkeypatch):
     try:
         for path in sorted((BASE / "supabase/migrations").glob("*.sql")):
             await c.execute(path.read_text())
-        await c.execute(
-            f"grant usage on schema growth to {role};grant select,insert,update,delete on all tables in schema growth to {role}"
+        grants = (
+            (BASE / "ops/runtime_grants.sql")
+            .read_text()
+            .replace(':"runtime_role"', role)
         )
+        await c.execute(grants)
 
         async def setup(conn):
             await conn.execute(f"set role {role}")
@@ -165,6 +168,10 @@ async def test_business_handoff_receipts_and_duplicate_confirmations(pilot):
     assert s["topics"][0]["count"] == 2
     receipt = s["receipts"][0]
     assert receipt["id"] == await put_photo(client, "income", photo)
+    duplicate = io.BytesIO()
+    Image.open(io.BytesIO(photo)).save(duplicate, format="PNG", compress_level=0)
+    assert duplicate.getvalue() != photo
+    assert receipt["id"] == await put_photo(client, "income", duplicate.getvalue())
     assert (await client.get("/growth/files/" + receipt["file_id"])).content == photo
     oid = (
         await call(
@@ -373,3 +380,148 @@ async def test_live_paths_with_provider_fixtures(pilot, monkeypatch):
         p = await billing.activate(admin, biz, UUID(iid), 48000, "DEMO-ref")
         assert p["plan"] == "Starter"
     assert (await state(client))["figures"]["income"] == 0
+
+
+async def test_supabase_auth_storage_contract_and_real_shop_template(
+    pilot, monkeypatch
+):
+    client, biz, admin = pilot
+    user = uuid4()
+    monkeypatch.setenv("SUPABASE_URL", "https://dev.example.test")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "publishable-fixture")
+    monkeypatch.setenv("SUPABASE_STORAGE_KEY", "sb_secret_fixture")
+    upstream = httpx.AsyncClient
+    objects = {}
+
+    def mock_provider(request):
+        path = request.url.path
+        if path.startswith("/storage/"):
+            assert request.headers["apikey"] == "sb_secret_fixture"
+            if request.method == "POST":
+                objects[path] = request.content
+                return httpx.Response(200, json={"Key": path})
+            return httpx.Response(200, content=objects[path])
+        assert request.headers["apikey"] == "publishable-fixture"
+        if path == "/auth/v1/user":
+            assert request.headers["authorization"] == "Bearer access-fixture"
+            return httpx.Response(
+                200, json={"id": str(user), "email": "pilot@example.test"}
+            )
+        if path == "/auth/v1/signup":
+            return httpx.Response(200, json={"id": str(user)})
+        if path == "/auth/v1/token":
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "access-fixture",
+                    "refresh_token": "refresh-fixture",
+                    "expires_in": 3600,
+                },
+            )
+        if path == "/auth/v1/logout":
+            return httpx.Response(204)
+        raise AssertionError(path)
+
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: upstream(
+            transport=httpx.MockTransport(mock_provider), **kwargs
+        ),
+    )
+    credentials = {"email": "pilot@example.test", "password": "fixture-password"}
+    assert (await call(client, "auth/signup", credentials))["confirm_email"]
+    assert (await call(client, "auth/login", credentials))["signed_in"]
+    assert "growth_demo" not in client.cookies
+    assert not (await client.get("/growth/me")).json()["memberships"]
+    real = (await call(client, "onboard", {"name": "QA only", "language": "uz"}))["id"]
+    assert real != str(biz)
+    assert (await client.post("/growth/refresh")).is_success
+    pic = png("beige")
+    await put_photo(client, "income", pic)
+    r = (await state(client))["receipts"][0]
+    assert await admin.fetchval(
+        "select bytes is null and object_path is not null from growth.files where id=$1",
+        UUID(r["file_id"]),
+    )
+    assert (await client.get("/growth/files/" + r["file_id"])).content == pic
+    pid = (await call(client, "products", {"name": "Tort", "price": 60000}))["id"]
+    visual = await call(client, "visuals/" + pid + "?template=true", {})
+    assert (await client.get("/growth/files/" + visual["file_id"])).content.startswith(
+        b"\x89PNG"
+    )
+    assert (await client.post("/growth/logout")).is_success
+    assert (await client.get("/growth/files/" + r["file_id"])).status_code == 401
+
+
+async def test_legacy_commands_and_business_dispatch(pilot, monkeypatch):
+    import bot
+    from aiogram import Bot, Dispatcher
+    from aiogram.types import Update
+
+    client, biz, admin = pilot
+    await admin.execute("set search_path=growth_legacy,public")
+    await admin.execute("insert into users(telegram_id,lang) values(8001,'ru')")
+    await admin.execute(
+        "insert into businesses(owner_id,name) select id,'DEMO legacy' from users where telegram_id=8001"
+    )
+    await admin.execute(
+        "insert into growth.connections values('qa-wire',$1,8001,true)", biz
+    )
+    await call(client, "products", {"name": "Медовик", "price": 85000})
+    # Legacy schema is accessible only to the original owner-bot service.
+    dsn = os.environ["TEST_POSTGRES_URL"]
+    pool = await asyncpg.create_pool(
+        dsn,
+        database=await admin.fetchval("select current_database()"),
+        server_settings={"search_path": "growth_legacy,public"},
+    )
+    monkeypatch.setattr(db, "_pool", pool)
+    transport = Bot("100000:TEST_FIXTURE_ONLY")
+    sent = []
+
+    async def capture(self, method, request_timeout=None):
+        sent.append(method)
+        return True
+
+    monkeypatch.setattr(Bot, "__call__", capture)
+    dp = Dispatcher()
+    dp.include_routers(telegram.router, bot.router)
+    try:
+        for mid, command in enumerate(("/start", "/dashboard"), 1):
+            raw = {
+                "message_id": mid,
+                "date": 1795500000,
+                "chat": {"id": 8001, "type": "private"},
+                "from": {"id": 8001, "is_bot": False, "first_name": "Owner"},
+                "text": command,
+            }
+            await dp.feed_update(
+                transport,
+                Update.model_validate(
+                    {"update_id": mid, "message": raw}, context={"bot": transport}
+                ),
+            )
+        assert len(sent) == 2
+        assert await admin.fetchval("select count(*) from link_codes") == 1
+        raw.update(
+            {
+                "business_connection_id": "qa-wire",
+                "chat": {"id": 9002, "type": "private"},
+                "from": {"id": 9002, "is_bot": False, "first_name": "Customer"},
+                "text": "Сколько стоит Медовик?",
+            }
+        )
+        await dp.feed_update(
+            transport,
+            Update.model_validate(
+                {"update_id": 3, "business_message": raw}, context={"bot": transport}
+            ),
+        )
+        assert (
+            sent[-1].text == "Медовик — 85 000 UZS"
+            and sent[-1].business_connection_id == "qa-wire"
+        )
+    finally:
+        await transport.session.close()
+        await pool.close()

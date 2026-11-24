@@ -1,0 +1,14 @@
+*
+!requirements.txt
+!bot.py
+!dashboard.py
+!db.py
+!text_parser.py
+!texts.py
+!growth/
+!growth/*.py
+!growth/assets/
+!growth/assets/**
+!static/
+!static/**
+**/__pycache__/

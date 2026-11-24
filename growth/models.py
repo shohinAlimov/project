@@ -1,7 +1,8 @@
 from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from urllib.parse import urlsplit
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]
 Name = Annotated[
@@ -26,10 +27,29 @@ class Profile(Model):
     goals: Text = ""
     delivery: Text = ""
     payment: Text = ""
+    delivery_other: Text = ""
+    payment_other: Text = ""
+    payme: Text = ""
+    click: Text = ""
     followup: Text = ""
+    followup_extra: Text = ""
     color: str = Field(default="#286452", pattern=r"^#[a-fA-F0-9]{6}$")
     tone: Text = ""
     logo: Text = ""
+
+    @field_validator("payme", "click")
+    @classmethod
+    def checkout_link(cls, value):
+        if value:
+            url = urlsplit(value)
+            if (
+                url.scheme != "https"
+                or not url.hostname
+                or url.username
+                or url.password
+            ):
+                raise ValueError("Enter an HTTPS checkout URL")
+        return value
 
 
 class Product(Model):
@@ -40,16 +60,16 @@ class Product(Model):
     availability: Text = ""
     lead_time: Text = ""
     sourcing: Text = ""
+    variants_other: Text = ""
+    availability_other: Text = ""
+    lead_time_other: Text = ""
 
 
 class Faq(Model):
     question: Name
-    answer: (
-        Name
-        | Annotated[
-            str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1800)
-        ]
-    )
+    answer: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1800)
+    ]
     language: Lang
 
 

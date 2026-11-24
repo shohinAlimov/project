@@ -139,7 +139,11 @@ async def identity(req):
     if not access:
         raise HTTPException(401)
     user = await auth_call("GET", "user", headers={"Authorization": "Bearer " + access})
-    return UUID(user["id"]), user.get("email", "").lower(), False
+    return (
+        UUID(user["id"]),
+        (user.get("email", "").lower() if user.get("email_confirmed_at") else ""),
+        False,
+    )
 
 
 async def context(conn, key, value):

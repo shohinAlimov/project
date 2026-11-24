@@ -1,6 +1,7 @@
 """Updates from Telegram Business use their own router and explicit connection allowlist."""
 
 import json
+import logging
 import os
 import re
 
@@ -14,12 +15,14 @@ from .media import MAX_BYTES, completion, receive
 
 router = Router()
 PATTERNS = {
-    "handoff": r"жалоб|вернит|возврат|не приш|повреж|испорт|индивидуаль|особый|на заказ|свой дизайн|скидк|shikoyat|qaytar|individual|maxsus|chegirma|custom|complaint",
-    "price": r"сколько|цен[аыу]|стоимост|стоит|narx|qancha|nech[aip]|price",
-    "delivery": r"достав|самовывоз|yetkaz|olib ket|delivery",
-    "payment": r"оплат|платить|карт[ау]|to.lov|to.la|payment",
+    "handoff": r"исключени|отсроч|рассроч|в долг|istisno|keyin to.la|жалоб|вернит|возврат|не приш|повреж|испорт|индивидуаль|особый|на заказ|свой дизайн|скидк|shikoyat|qaytar|individual|maxsus|chegirma|custom|complaint",
+    "catalog": r"каталог|ассортимент|какие товары|какие торты|mahsulotlar|qanday tortlar|katalog",
+    "description": r"состав|описани|tarkib|tavsif",
+    "price": r"қанча|нарх|сколько|цен[аыу]|стоимост|стоит|narx|qancha|nech[aip]|price",
+    "delivery": r"етказ|достав|самовывоз|yetkaz|olib ket|delivery",
+    "payment": r"тўлов|оплат|платить|карт[ау]|to.lov|to.la|payment",
     "variants": r"дизайн|вариант|цвет|dizayn|variant|rang|design",
-    "availability": r"наличи|доступ|есть ли|mavjud|bormi|available",
+    "availability": r"борми|мавжуд|наличи|доступ|есть ли|mavjud|bormi|available",
     "lead_time": r"срок|когда готов|muddat|qachon|tayyor",
 }
 
@@ -29,15 +32,13 @@ def norm(value):
 
 
 def language(message, default):
-    if re.search(r"[а-яё]", message, re.I):
-        return "uz" if re.search(r"[ўқғҳ]|қанча|нарх|борми", message, re.I) else "ru"
-    return (
-        "uz"
-        if re.search(
-            r"narx|qancha|bormi|yetkaz|to.lov|qachon|salom|necha", message, re.I
-        )
-        else default
-    )
+    if re.search(
+        r"[ўқғҳ]|қанча|нарх|борми|narx|qancha|bormi|yetkaz|to.lov|qachon|salom|necha",
+        message,
+        re.I,
+    ):
+        return "uz"
+    return "ru" if re.search(r"[а-яё]", message, re.I) else default
 
 
 async def answer(c, biz, message, shop):
@@ -54,7 +55,7 @@ async def answer(c, biz, message, shop):
         None,
     )
     faq = next((f for f in faqs if norm(f["question"]) == text), None)
-    if topic == "handoff":
+    if topic == "handoff" or len(matches) > 1:
         return "handoff", product, None
     if (
         (
@@ -95,6 +96,12 @@ async def answer(c, biz, message, shop):
     result = None
     if topic == "handoff":
         return topic, product, None
+    if faq and "{price}" in faq["answer"] and product:
+        return (
+            "faq",
+            product,
+            faq["answer"].replace("{price}", f"{product['price']:,}".replace(",", " ")),
+        )
     if product and topic == "price":
         result = f"{product['name']} — {product['price']:,} UZS".replace(",", " ")
     elif faq:
@@ -104,10 +111,27 @@ async def answer(c, biz, message, shop):
                 result.replace("{price}", str(product["price"])) if product else None
             )
         topic = "faq"
+    elif topic == "catalog":
+        lines = [
+            f"{p['name']} — {p['price']:,} UZS".replace(",", " ") for p in products[:12]
+        ]
+        result = "\n".join(lines)
+    elif product and topic == "description" and lang == shop["language"]:
+        result = json.loads(product["details"]).get("description")
     elif topic in ("delivery", "payment"):
-        result = json.loads(shop["profile"]).get(topic)
+        profile = json.loads(shop["profile"])
+        result = profile.get(topic if lang == shop["language"] else topic + "_other")
+        if topic == "payment":
+            links = [
+                profile.get(provider)
+                for provider in ("payme", "click")
+                if profile.get(provider)
+            ]
+            result = "\n".join(filter(None, [result, *links]))
     elif product and topic in ("variants", "availability", "lead_time"):
-        result = json.loads(product["details"]).get(topic)
+        result = json.loads(product["details"]).get(
+            topic if lang == shop["language"] else topic + "_other"
+        )
     return topic or "handoff", product, result or None
 
 
@@ -119,6 +143,12 @@ async def connection_changed(event: BusinessConnection):
         row = await c.fetchrow(
             "select * from growth.connections where connection=$1", event.id
         )
+        if not row and event.is_enabled:
+            logging.getLogger("uvicorn.error").info(
+                "Pending Business connection %s for Telegram owner %s",
+                event.id,
+                event.user.id,
+            )
         if row and row["telegram_owner"] == event.user.id:
             await context(c, "business", row["business_id"])
             await c.execute(
@@ -172,11 +202,21 @@ async def handle(
                 "📎",
             )
         return
-    if not text or row["paused"]:
-        if text:
-            await c.execute(
-                "update growth.chats set summary=$2 where id=$1", row["id"], text[:240]
-            )
+    if not text:
+        await c.execute(
+            "update growth.chats set paused=true,summary=$2 where id=$1",
+            row["id"],
+            "📎",
+        )
+        return
+    if row["paused"]:
+        reason = row["summary"].partition("\n")[0]
+        latest = " ".join(text.split())[:240]
+        await c.execute(
+            "update growth.chats set summary=$2 where id=$1",
+            row["id"],
+            "\n".join(filter(None, (reason, latest))),
+        )
         return
     topic, product, reply = await answer(c, biz, text[:2000], shop)
     await c.execute(

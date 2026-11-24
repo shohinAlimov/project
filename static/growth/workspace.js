@@ -120,6 +120,8 @@ const form = (inputs, label = save()) =>
 const topicName = (k) =>
   ({
     price: t("Narx", "Цена"),
+    catalog: t("Katalog", "Каталог"),
+    description: t("Tavsif", "Описание"),
     faq: t("Tasdiqlangan javob", "Готовый ответ"),
     delivery: t("Yetkazib berish", "Доставка"),
     payment: t("To‘lov", "Оплата"),
@@ -244,6 +246,17 @@ function authPage() {
   root.querySelector("form").className = "stack";
   document.documentElement.lang = lang;
 }
+function otherLanguage(fields, obj) {
+  return (
+    '<details class="wide"><summary>' +
+    t("Ikkinchi tildagi javoblar", "Ответы на втором языке") +
+    '</summary><div class="stack">' +
+    fields
+      .map(([key, label]) => field(key + "_other", label, obj[key + "_other"]))
+      .join("") +
+    "</div></details>"
+  );
+}
 function profileFields(p = {}) {
   return (
     field("name", t("Biznes nomi", "Название бизнеса"), p.name, "text", true) +
@@ -283,12 +296,38 @@ function profileFields(p = {}) {
           ),
       p.followup,
     ) +
+    field(
+      "followup_extra",
+      p.business_type === "bakery"
+        ? t(
+            "Bir kunda nechta buyurtma tayyorlaysiz?",
+            "Сколько заказов готовите за день?",
+          )
+        : t(
+            "Ombordagi qoldiq qanday tekshiriladi?",
+            "Как проверяете остатки на складе?",
+          ),
+      p.followup_extra,
+    ) +
     area(
       "delivery",
       t("Yetkazib berish shartlari", "Условия доставки"),
       p.delivery,
     ) +
     area("payment", t("To‘lov qoidalari", "Правила оплаты"), p.payment) +
+    otherLanguage(
+      [
+        ["delivery", t("Yetkazib berish", "Доставка")],
+        ["payment", t("To‘lov shartlari", "Условия оплаты")],
+      ],
+      p,
+    ) +
+    '<details class="wide"><summary>' +
+    t("To‘lov havolalari", "Платёжные ссылки") +
+    '</summary><div class="stack">' +
+    field("payme", "Payme", p.payme, "url") +
+    field("click", "Click", p.click, "url") +
+    "</div></details>" +
     "<label>" +
     t("Brend yo‘nalishi", "Визуальное направление") +
     '<select data-brand><option value="">' +
@@ -426,18 +465,14 @@ function txList(rows) {
   );
 }
 function trend() {
-  const rows = state.journal || [],
+  const rows = state.week_income || [],
     days = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today() + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() - i);
     days.push(d.toISOString().slice(0, 10));
   }
-  const vals = days.map((d) =>
-    rows
-      .filter((r) => r.kind === "income" && r.day === d)
-      .reduce((a, r) => a + r.amount, 0),
-  );
+  const vals = days.map((d) => rows.find((r) => r.day === d)?.total || 0);
   return (
     '<div class="chart" aria-label="' +
     t("Oxirgi yetti kun", "Последние семь дней") +
@@ -577,6 +612,43 @@ function production() {
       ),
   );
 }
+function postIdea(row) {
+  const subject = row.product || t("katalog", "каталог");
+  const ideas = {
+    variants: t(
+      "Mavjud dizaynlarni karuselda ko‘rsating.",
+      "Соберите доступные варианты дизайна в карусель.",
+    ),
+    price: t(
+      "Joriy narx va mavjud variantlar bilan mahsulot kartasini chiqaring.",
+      "Опубликуйте карточку с текущей ценой и доступными вариантами.",
+    ),
+    delivery: t(
+      "Yetkazish hududi va shartlari haqida post tayyorlang.",
+      "Подготовьте пост об условиях и зоне доставки.",
+    ),
+    payment: t(
+      "Buyurtmani qanday to‘lashni tushuntiring.",
+      "Объясните, как оплатить заказ.",
+    ),
+    availability: t(
+      "Hozir mavjud mahsulotlar tanlovini chiqaring.",
+      "Покажите подборку товаров в наличии.",
+    ),
+  };
+  return (
+    subject +
+    " · " +
+    (ideas[row.topic] ||
+      t(
+        "Eng ko‘p beriladigan savolga javobni post qiling.",
+        "Опубликуйте ответ на частый вопрос.",
+      )) +
+    " (" +
+    row.count +
+    ")"
+  );
+}
 function marketing() {
   const first = state.topics[0];
   return (
@@ -594,13 +666,7 @@ function marketing() {
       t("Post g‘oyasi", "Идея публикации"),
       '<p class="blank">' +
         (first
-          ? esc(
-              t("Post mavzusi", "Тема поста") +
-                " — " +
-                topicName(first.topic) +
-                " " +
-                first.product,
-            )
+          ? esc(postIdea(first))
           : t(
               "Mijozlar savollari kelganda bu yerda tavsiya paydo bo‘ladi.",
               "Когда появятся вопросы клиентов, здесь будет рекомендация.",
@@ -679,11 +745,12 @@ function settings() {
   return (
     panel(
       t("Biznes xotirasi", "Данные бизнеса"),
-      item(
-        state.name,
-        btn("profile", t("Profilni tahrirlash", "Изменить профиль"), "soft"),
-        state.profile.description,
-      ) +
+      item(t("Ish joyi ID", "ID рабочего пространства"), esc(state.id)) +
+        item(
+          state.name,
+          btn("profile", t("Profilni tahrirlash", "Изменить профиль"), "soft"),
+          state.profile.description,
+        ) +
         item(
           t("Brend fayli", "Файл бренда"),
           btn("brand", t("Yuklash", "Загрузить"), "plain"),
@@ -915,6 +982,14 @@ function editProduct(id) {
         "sourcing",
         t("Ishlab chiqarish yoki manba", "Изготовление или закупка"),
         d.sourcing,
+      ) +
+      otherLanguage(
+        [
+          ["variants", topicName("variants")],
+          ["availability", topicName("availability")],
+          ["lead_time", topicName("lead_time")],
+        ],
+        d,
       ),
     async (o) =>
       api("products" + (id ? "/" + id : ""), id ? "PUT" : "POST", {
@@ -1117,7 +1192,7 @@ const actions = {
           ),
           q.answer,
         ),
-      (o) => api("faqs", "POST", o),
+      (o) => api("faqs" + (id ? "/" + id : ""), id ? "PUT" : "POST", o),
     );
   },
   order: () => {
@@ -1192,8 +1267,18 @@ const actions = {
         "pid",
         t("Mahsulot", "Товар"),
         state.products.map((p) => [p.id, p.name]),
-      ),
-      (o) => api("visuals/" + o.pid, "POST"),
+      ) +
+        select("format", t("Post turi", "Формат"), [
+          ["template", t("Brend shabloni", "Фирменный шаблон")],
+          ...(state.image_ai
+            ? [["ai", t("AI fotosurat", "AI-фотография")]]
+            : []),
+        ]),
+      (o) =>
+        api(
+          "visuals/" + o.pid + "?template=" + (o.format === "template"),
+          "POST",
+        ),
       t("Yaratish", "Создать"),
     );
   },
@@ -1290,6 +1375,16 @@ document.addEventListener("change", async (e) => {
       : t("Sopol muhr", "Глиняная печать");
   }
   if (el.name === "business_type") {
+    el.form.elements.followup_extra.closest("label").firstChild.textContent =
+      el.value === "bakery"
+        ? t(
+            "Bir kunda nechta buyurtma tayyorlaysiz?",
+            "Сколько заказов готовите за день?",
+          )
+        : t(
+            "Ombordagi qoldiq qanday tekshiriladi?",
+            "Как проверяете остатки на складе?",
+          );
     const f = el.form.elements.followup;
     f.closest("label").firstChild.textContent =
       el.value === "bakery"
