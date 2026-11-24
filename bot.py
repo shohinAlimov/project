@@ -4,7 +4,7 @@ import os
 from datetime import date
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -18,7 +18,7 @@ from texts import LANGS, cat_label, t
 
 load_dotenv()
 router = Router()
-MENU_KEYS = ("menu_income", "menu_expense", "menu_summary", "menu_history", "menu_settings")
+MENU_KEYS = ("menu_income", "menu_expense", "menu_summary", "menu_history", "menu_settings", "menu_dashboard")
 MENU = {t(l, k): k for l in LANGS for k in MENU_KEYS}
 
 
@@ -39,7 +39,7 @@ def kb_menu(lang):
     return ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
         [b("menu_income"), b("menu_expense")],
         [b("menu_summary"), b("menu_history")],
-        [b("menu_settings")]])
+        [b("menu_settings"), b("menu_dashboard")]])
 
 
 def money(n):
@@ -123,6 +123,21 @@ async def got_name(m: Message, state: FSMContext):
     await m.answer(t(lang, "ready"), reply_markup=kb_menu(lang))
 
 
+# ---------- dashboard login code ----------
+async def send_dash_code(m: Message, lang):
+    if not await db.get_business(m.from_user.id):
+        await m.answer(t(lang, "need_start"))
+        return
+    code = await db.create_link_code(m.from_user.id)
+    url = os.getenv("DASHBOARD_URL", "http://localhost:8000")
+    await m.answer(t(lang, "dash_code").format(code=code, url=url))
+
+
+@router.message(Command("dashboard"))
+async def dashboard_cmd(m: Message):
+    await send_dash_code(m, await db.get_lang(m.from_user.id))
+
+
 # ---------- main menu ----------
 @router.message(F.text.in_(set(MENU)))
 async def menu(m: Message, state: FSMContext):
@@ -152,6 +167,8 @@ async def menu(m: Message, state: FSMContext):
             lines.append(f"{fmt_date(r['date'])}  {sign}{money(r['amount'])}  "
                          f"{cat_label(lang, r['category'])}")
         await m.answer("\n".join(lines))
+    elif action == "menu_dashboard":
+        await send_dash_code(m, lang)
     elif action == "menu_settings":
         await m.answer(t(lang, "settings"),
                        reply_markup=ikb([[("O‘zbekcha", "lang:uz"), ("Русский", "lang:ru")]]))

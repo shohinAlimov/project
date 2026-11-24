@@ -95,3 +95,93 @@ async def summary(business_id, period):
         "FROM transactions WHERE business_id=$1 AND deleted_at IS NULL AND occurred_on BETWEEN $2 AND $3",
         business_id, start, today)
     return r["income"], r["expense"]
+
+
+# ---------- Dashboard ----------
+import hashlib
+import secrets
+
+
+def _h(code):
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
+async def create_link_code(tg_id):
+    """One-time login code for the Dashboard (stored hashed, valid 10 minutes)."""
+    code = f"{secrets.randbelow(10**8):08d}"
+    await _pool.execute(
+        "INSERT INTO link_codes(user_id, code_hash, expires_at) "
+        "SELECT id, $2, now() + interval '10 minutes' FROM users WHERE telegram_id=$1", tg_id, _h(code))
+    return code
+
+
+async def use_link_code(code):
+    return await _pool.fetchrow(
+        "UPDATE link_codes SET used_at=now() WHERE code_hash=$1 AND used_at IS NULL "
+        "AND expires_at > now() RETURNING user_id", _h(code))
+
+
+async def business_of_user(user_id):
+    return await _pool.fetchrow(
+        "SELECT b.id, b.name, b.currency, u.lang FROM businesses b JOIN users u ON u.id=b.owner_id "
+        "WHERE u.id=$1 ORDER BY b.id LIMIT 1", user_id)
+
+
+async def dash_summary(business_id, start, end):
+    base = "FROM transactions WHERE business_id=$1 AND deleted_at IS NULL AND occurred_on BETWEEN $2 AND $3"
+    tot = await _pool.fetchrow(
+        "SELECT COALESCE(SUM(amount) FILTER (WHERE type='income'),0)::bigint AS received, "
+        "COALESCE(SUM(amount) FILTER (WHERE type='expense'),0)::bigint AS spent " + base,
+        business_id, start, end)
+    days = await _pool.fetch(
+        "SELECT occurred_on::text AS d, "
+        "COALESCE(SUM(amount) FILTER (WHERE type='income'),0)::bigint AS income, "
+        "COALESCE(SUM(amount) FILTER (WHERE type='expense'),0)::bigint AS expense "
+        + base + " GROUP BY occurred_on ORDER BY occurred_on", business_id, start, end)
+    cats = await _pool.fetch(
+        "SELECT COALESCE(c.code, c.name_ru) AS category, SUM(t.amount)::bigint AS total "
+        "FROM transactions t LEFT JOIN categories c ON c.id=t.category_id "
+        "WHERE t.business_id=$1 AND t.deleted_at IS NULL AND t.type='expense' "
+        "AND t.occurred_on BETWEEN $2 AND $3 GROUP BY 1 ORDER BY 2 DESC", business_id, start, end)
+    return {"received": tot["received"], "spent": tot["spent"], "diff": tot["received"] - tot["spent"],
+            "days": [dict(r) for r in days], "categories": [dict(r) for r in cats]}
+
+
+async def dash_transactions(business_id, start, end, tx_type=None, q=None, limit=500):
+    sql = ("SELECT t.id, t.type, t.amount::bigint AS amount, t.occurred_on::text AS date, "
+           "COALESCE(c.code, c.name_ru) AS category, t.description, t.is_corrected "
+           "FROM transactions t LEFT JOIN categories c ON c.id=t.category_id "
+           "WHERE t.business_id=$1 AND t.deleted_at IS NULL AND t.occurred_on BETWEEN $2 AND $3")
+    args = [business_id, start, end]
+    if tx_type in ("income", "expense"):
+        args.append(tx_type)
+        sql += f" AND t.type=${len(args)}"
+    if q:
+        args.append(f"%{q}%")
+        sql += f" AND (t.description ILIKE ${len(args)} OR t.counterparty ILIKE ${len(args)})"
+    args.append(limit)
+    sql += f" ORDER BY t.occurred_on DESC, t.id DESC LIMIT ${len(args)}"
+    return [dict(r) for r in await _pool.fetch(sql, *args)]
+
+
+async def dash_update_tx(business_id, tx_id, amount=None, day=None, category=None, description=None):
+    async with _pool.acquire() as conn:
+        async with conn.transaction():
+            tx = await conn.fetchrow(
+                "SELECT id, type FROM transactions WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL",
+                tx_id, business_id)
+            if not tx:
+                return False
+            cat_id = await _category_id(conn, business_id, tx["type"], category) if category else None
+            await conn.execute(
+                "UPDATE transactions SET amount=COALESCE($3,amount), occurred_on=COALESCE($4,occurred_on), "
+                "category_id=COALESCE($5,category_id), description=COALESCE($6,description) "
+                "WHERE id=$1 AND business_id=$2", tx_id, business_id, amount, day, cat_id, description)
+    return True
+
+
+async def dash_delete_tx(business_id, tx_id):
+    r = await _pool.execute(
+        "UPDATE transactions SET deleted_at=now() WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL",
+        tx_id, business_id)
+    return r.endswith("1")

@@ -1,9 +1,12 @@
-# Business Assistant — Telegram bot skeleton
+# Business Assistant — Telegram bot + Web Dashboard
 
     pip install -r requirements.txt
-    cp .env.example .env      # put BOT_TOKEN
-    python bot.py
+    cp .env.example .env     # BOT_TOKEN, DATABASE_URL, SESSION_SECRET
+    # run schema.sql once in Supabase SQL Editor
 
-Files: `bot.py` (handlers), `text_parser.py` (text parsing), `db.py` (SQLite), `texts.py` (UZ/RU).
-Nothing is saved without the user pressing "Confirm".
-TODO: OCR in `recognize_receipt`, AI parsing in `text_parser.parse`, edit/delete history, reminders.
+    python bot.py            # terminal 1
+    python dashboard.py      # terminal 2 -> http://localhost:8000
+
+Login: send /dashboard to the bot (or press the Dashboard button), enter the one-time code on the site.
+
+Files: bot.py, text_parser.py, texts.py, db.py (PostgreSQL), dashboard.py (API), static/index.html (UI), schema.sql.

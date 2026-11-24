@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Business Assistant</title>
+<style>
+:root{--navy:#17324D;--blue:#2F80ED;--teal:#20A39E;--bg:#F4F7FA;--card:#fff;--green:#219653;--orange:#F2994A;--text:#243342;--line:#E3E9EF}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:16px}
+header{background:var(--navy);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center}
+header b{font-size:18px}
+header button{background:none;border:1px solid #fff6;color:#fff;border-radius:8px;padding:6px 12px;font-size:14px}
+main{max-width:860px;margin:0 auto;padding:16px}
+.card{background:var(--card);border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px #0001}
+h2{font-size:16px;margin:0 0 12px;color:var(--navy)}
+button,input,select{font:inherit}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.chip{padding:10px 16px;border-radius:20px;border:1px solid var(--line);background:#fff;color:var(--text);cursor:pointer}
+.chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.custom{display:none;gap:8px;margin-bottom:12px}.custom.on{display:flex}
+input,select{padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);min-width:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 1px 3px #0001}
+.stat small{color:#5b6b7a;display:block;margin-bottom:6px}
+.stat b{font-size:22px}
+.in{color:var(--green)}.out{color:var(--navy)}.warn{color:var(--orange)}
+.chart{overflow-x:auto}
+.legend{display:flex;gap:16px;font-size:14px;margin-bottom:8px}
+.empty{color:#5b6b7a;padding:12px 0}
+.cat{margin-bottom:10px;font-size:15px}.cat .bar{height:8px;background:var(--blue);border-radius:4px;margin-top:4px}
+.tools{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}.tools input{flex:1;min-width:140px}
+.tx{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.tx small{color:#5b6b7a;display:block}
+.tx .r{text-align:right;white-space:nowrap}
+.tx .acts button{background:none;border:0;color:var(--blue);padding:6px 4px;font-size:14px}
+.tx .acts .del{color:var(--orange)}
+.badge{font-size:12px;color:var(--teal);margin-left:6px}
+.btn{background:var(--blue);color:#fff;border:0;border-radius:10px;padding:12px 18px;font-size:16px}
+.btn.sec{background:#fff;color:var(--text);border:1px solid var(--line)}
+.login{max-width:380px;margin:60px auto}.login input{width:100%;font-size:22px;letter-spacing:4px;text-align:center;margin:12px 0}
+.err{color:var(--orange);min-height:22px}
+dialog{border:0;border-radius:12px;padding:20px;width:min(92vw,380px)}
+dialog label{display:block;margin:10px 0 4px;font-size:14px;color:#5b6b7a}dialog input{width:100%}
+dialog .row{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+a.link{color:var(--blue);font-size:14px}
+</style>
+</head>
+<body>
+<header><b>Business Assistant</b><span><span id="biz"></span> <button id="logout" hidden></button></span></header>
+<main>
+<div id="login" class="card login" hidden>
+  <h2 id="l-title"></h2><div id="l-hint"></div>
+  <input id="code" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="00000000">
+  <div class="err" id="l-err"></div>
+  <button class="btn" id="l-go" style="width:100%"></button>
+</div>
+<div id="app" hidden>
+  <div class="chips" id="chips"></div>
+  <div class="custom" id="custom"><input type="date" id="d1"><input type="date" id="d2"></div>
+  <div class="stats">
+    <div class="stat"><small id="t-in"></small><b class="in" id="v-in">–</b></div>
+    <div class="stat"><small id="t-out"></small><b class="out" id="v-out">–</b></div>
+    <div class="stat"><small id="t-diff"></small><b id="v-diff">–</b></div>
+  </div>
+  <div class="card"><h2 id="t-chart"></h2><div class="legend"><span class="in">▲ <span id="lg-in"></span></span><span class="out">▼ <span id="lg-out"></span></span></div><div class="chart" id="chart"></div></div>
+  <div class="card"><h2 id="t-cats"></h2><div id="cats"></div></div>
+  <div class="card"><h2 id="t-ops"></h2>
+    <div class="tools"><select id="f-type"></select><input id="f-q" type="search"><a class="link" id="csv" href="#"></a></div>
+    <div id="list"></div>
+  </div>
+</div>
+</main>
+<dialog id="dlg"><form method="dialog" id="form">
+  <label id="e-amount-l"></label><input id="e-amount" type="number" min="1" required>
+  <label id="e-date-l"></label><input id="e-date" type="date" required>
+  <label id="e-cat-l"></label><input id="e-cat" required>
+  <label id="e-desc-l"></label><input id="e-desc">
+  <div class="row"><button class="btn sec" value="cancel" id="e-cancel" formnovalidate></button><button class="btn" value="ok" id="e-save"></button></div>
+</form></dialog>
+<script>
+const I18N={
+ru:{login:"Вход в Dashboard",hint:"Отправьте боту команду /dashboard и введите код из сообщения.",go:"Войти",bad:"Неверный или просроченный код",many:"Слишком много попыток, подождите минуту",
+today:"Сегодня",week:"7 дней",month:"Месяц",custom:"Период",in:"Получено",out:"Потрачено",diff:"Разница",chart:"Поступления и расходы",
+chartEmpty:"Добавьте первые операции, чтобы увидеть динамику",cats:"Расходы по категориям",ops:"Операции",search:"Поиск",all:"Все",income:"Доход",expense:"Расход",
+edit:"Изменить",del:"Удалить",confirmDel:"Удалить операцию?",save:"Сохранить",cancel:"Отмена",amount:"Сумма",date:"Дата",cat:"Категория",desc:"Описание",
+corrected:"исправлено",empty:"Нет операций за период",csv:"Экспорт CSV",logout:"Выйти",err:"Не удалось сохранить"},
+uz:{login:"Dashboardga kirish",hint:"Botga /dashboard buyrug‘ini yuboring va xabardagi kodni kiriting.",go:"Kirish",bad:"Kod noto‘g‘ri yoki muddati o‘tgan",many:"Urinishlar ko‘p, bir daqiqa kuting",
+today:"Bugun",week:"7 kun",month:"Oy",custom:"Davr",in:"Qabul qilindi",out:"Sarflandi",diff:"Farq",chart:"Tushum va xarajatlar",
+chartEmpty:"Dinamikani ko‘rish uchun birinchi amallarni qo‘shing",cats:"Kategoriya bo‘yicha xarajatlar",ops:"Amallar",search:"Qidiruv",all:"Hammasi",income:"Daromad",expense:"Xarajat",
+edit:"O‘zgartirish",del:"O‘chirish",confirmDel:"Amal o‘chirilsinmi?",save:"Saqlash",cancel:"Bekor qilish",amount:"Summa",date:"Sana",cat:"Kategoriya",desc:"Izoh",
+corrected:"tuzatilgan",empty:"Bu davrda amallar yo‘q",csv:"CSV eksport",logout:"Chiqish",err:"Saqlab bo‘lmadi"}};
+const CAT={purchases:["Закупки","Xaridlar"],rent:["Аренда","Ijara"],transport:["Транспорт","Transport"],utilities:["Коммунальные","Kommunal"],
+marketing:["Реклама","Reklama"],sales:["Продажи","Savdo"],other_expense:["Прочие расходы","Boshqa xarajatlar"],other_income:["Прочие поступления","Boshqa tushumlar"]};
+const $=s=>document.querySelector(s);
+let lang="ru",L=I18N.ru,per="month",rows=[],editId=null,timer;
+const catName=c=>CAT[c]?CAT[c][lang==="uz"?1:0]:(c||"");
+const money=n=>Math.abs(n).toLocaleString("ru-RU")+" UZS";
+const pad=n=>String(n).padStart(2,"0");
+const iso=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const dmy=s=>s.split("-").reverse().join(".");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function setLang(l){lang=l;L=I18N[l]||I18N.ru;document.documentElement.lang=l;
+ $("#l-title").textContent=L.login;$("#l-hint").textContent=L.hint;$("#l-go").textContent=L.go;
+ $("#t-in").textContent=L.in;$("#t-out").textContent=L.out;$("#t-diff").textContent=L.diff;
+ $("#t-chart").textContent=L.chart;$("#lg-in").textContent=L.in;$("#lg-out").textContent=L.out;
+ $("#t-cats").textContent=L.cats;$("#t-ops").textContent=L.ops;$("#f-q").placeholder=L.search;$("#csv").textContent=L.csv;
+ $("#logout").textContent=L.logout;
+ $("#f-type").innerHTML=`<option value="">${L.all}</option><option value="income">${L.income}</option><option value="expense">${L.expense}</option>`;
+ $("#e-amount-l").textContent=L.amount;$("#e-date-l").textContent=L.date;$("#e-cat-l").textContent=L.cat;$("#e-desc-l").textContent=L.desc;
+ $("#e-cancel").textContent=L.cancel;$("#e-save").textContent=L.save;
+ $("#chips").innerHTML=[["today",L.today],["week",L.week],["month",L.month],["custom",L.custom]]
+  .map(([k,t])=>`<button class="chip ${k===per?"on":""}" data-k="${k}">${t}</button>`).join("");}
+
+function range(){const t=new Date();
+ if(per==="today")return[iso(t),iso(t)];
+ if(per==="week"){const s=new Date();s.setDate(t.getDate()-6);return[iso(s),iso(t)]}
+ if(per==="month")return[iso(new Date(t.getFullYear(),t.getMonth(),1)),iso(t)];
+ return[$("#d1").value||iso(t),$("#d2").value||iso(t)];}
+const qs=()=>{const[s,e]=range();return new URLSearchParams({start:s,end:e,type:$("#f-type").value,q:$("#f-q").value.trim()}).toString()};
+
+async function api(path,opt={}){const r=await fetch(path,{credentials:"same-origin",headers:{"Content-Type":"application/json"},...opt});
+ if(r.status===401){showLogin();throw new Error("auth")}
+ if(!r.ok)throw new Error(r.status);return r.json();}
+
+function showLogin(){$("#app").hidden=true;$("#login").hidden=false;$("#logout").hidden=true;$("#biz").textContent="";}
+
+async function init(){
+ try{const me=await fetch("/api/me",{credentials:"same-origin"});
+  if(!me.ok)throw 0;const d=await me.json();setLang(d.lang);$("#biz").textContent=d.business;
+  $("#login").hidden=true;$("#app").hidden=false;$("#logout").hidden=false;load();}
+ catch{setLang("ru");showLogin();}}
+
+async function load(){
+ const[s,e]=range();
+ const sum=await api("/api/summary?"+new URLSearchParams({start:s,end:e}));
+ $("#v-in").textContent=money(sum.received);$("#v-out").textContent=money(sum.spent);
+ const dv=$("#v-diff");dv.textContent=(sum.diff<0?"− ":sum.diff>0?"+ ":"")+money(sum.diff);dv.className=sum.diff<0?"warn":"in";
+ drawChart(sum.days);drawCats(sum.categories);loadList();}
+
+function drawChart(days){const el=$("#chart");
+ if(!days.length){el.innerHTML=`<div class="empty">${L.chartEmpty}</div>`;return}
+ const max=Math.max(...days.map(d=>Math.max(d.income,d.expense)),1),H=140,bw=14,gap=14,W=days.length*(bw*2+gap)+10;
+ let g="";days.forEach((d,i)=>{const x=5+i*(bw*2+gap),hi=d.income/max*H,ho=d.expense/max*H;
+  g+=`<rect x="${x}" y="${H-hi}" width="${bw}" height="${hi}" fill="#219653"><title>${dmy(d.d)} ${L.in}: ${money(d.income)}</title></rect>`;
+  g+=`<rect x="${x+bw}" y="${H-ho}" width="${bw}" height="${ho}" fill="#17324D"><title>${dmy(d.d)} ${L.out}: ${money(d.expense)}</title></rect>`;
+  g+=`<text x="${x+bw}" y="${H+14}" font-size="10" text-anchor="middle" fill="#5b6b7a">${dmy(d.d).slice(0,5)}</text>`;});
+ el.innerHTML=`<svg width="${Math.max(W,300)}" height="${H+22}">${g}</svg>`;}
+
+function drawCats(cs){const el=$("#cats");
+ if(!cs.length){el.innerHTML=`<div class="empty">${L.empty}</div>`;return}
+ const max=cs[0].total;
+ el.innerHTML=cs.map(c=>`<div class="cat"><div style="display:flex;justify-content:space-between"><span>${esc(catName(c.category))}</span><span>${money(c.total)}</span></div><div class="bar" style="width:${Math.max(c.total/max*100,2)}%"></div></div>`).join("");}
+
+async function loadList(){
+ rows=await api("/api/transactions?"+qs());
+ $("#csv").href="/api/export.csv?"+qs();
+ $("#list").innerHTML=rows.length?rows.map(r=>`<div class="tx"><div><b>${esc(catName(r.category))}</b>${r.is_corrected?`<span class="badge">${L.corrected}</span>`:""}
+  <small>${dmy(r.date)} · ${esc(r.description)}</small>
+  <span class="acts"><button data-e="${r.id}">${L.edit}</button><button class="del" data-d="${r.id}">${L.del}</button></span></div>
+  <div class="r ${r.type==="income"?"in":"out"}">${r.type==="income"?"▲ +":"▼ −"}${money(r.amount)}</div></div>`).join(""):`<div class="empty">${L.empty}</div>`;}
+
+$("#chips").addEventListener("click",e=>{const k=e.target.dataset.k;if(!k)return;per=k;
+ document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.k===k));
+ $("#custom").classList.toggle("on",k==="custom");load();});
+["d1","d2"].forEach(i=>$("#"+i).addEventListener("change",load));
+$("#f-type").addEventListener("change",loadList);
+$("#f-q").addEventListener("input",()=>{clearTimeout(timer);timer=setTimeout(loadList,300)});
+$("#list").addEventListener("click",async e=>{
+ const eid=e.target.dataset.e,did=e.target.dataset.d;
+ if(eid){const r=rows.find(x=>x.id==eid);editId=r.id;$("#e-amount").value=r.amount;$("#e-date").value=r.date;$("#e-cat").value=catName(r.category);$("#e-desc").value=r.description||"";$("#dlg").showModal();}
+ if(did&&confirm(L.confirmDel)){await api("/api/transactions/"+did,{method:"DELETE"});load();}});
+$("#form").addEventListener("submit",async e=>{
+ if(e.submitter.value!=="ok")return;
+ try{await api("/api/transactions/"+editId,{method:"PATCH",body:JSON.stringify({amount:+$("#e-amount").value,date:$("#e-date").value,category:$("#e-cat").value,description:$("#e-desc").value})});load();}
+ catch{alert(L.err)}});
+$("#l-go").addEventListener("click",async()=>{
+ const r=await fetch("/api/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:$("#code").value})});
+ if(r.ok){$("#l-err").textContent="";$("#code").value="";init()}else $("#l-err").textContent=r.status===429?L.many:L.bad;});
+$("#code").addEventListener("keydown",e=>{if(e.key==="Enter")$("#l-go").click()});
+$("#logout").addEventListener("click",async()=>{await fetch("/api/logout",{method:"POST",credentials:"same-origin"});showLogin()});
+init();
+</script>
+</body>
+</html>
