@@ -1,15 +1,17 @@
 """Web Dashboard backend (FastAPI). Run: python dashboard.py  ->  http://localhost:8000"""
+import asyncio
 import base64
 import csv
 import hashlib
 import hmac
 import io
 import json
+import logging
 import os
 import secrets
 import time
-from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from contextlib import asynccontextmanager, suppress
+from datetime import date, timedelta    
 from pathlib import Path
 from typing import Optional
 
@@ -43,10 +45,30 @@ def unsign(token: str):
         return None
 
 
+async def keep_bot_alive():
+    """Restart the bot if it stops (e.g. temporary network problem)."""
+    import bot
+    while True:
+        try:
+            await bot.run_polling()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception("bot stopped, restarting in 10 s")
+            await asyncio.sleep(10)
+
+
 @asynccontextmanager
 async def lifespan(app):
     await db.init()
+    task = None
+    if os.getenv("RUN_BOT") == "1":  # hosting: one process runs both the bot and the site
+        task = asyncio.create_task(keep_bot_alive())
     yield
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
     await db.close()
 
 
@@ -85,6 +107,16 @@ class TxPatch(BaseModel):
 @app.get("/")
 async def index():
     return FileResponse(BASE / "static" / "index.html")
+
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 
 
 @app.post("/api/login")
@@ -167,4 +199,5 @@ async def export(start: str = None, end: str = None, type: str = None, q: str = 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")),
+                proxy_headers=True, forwarded_allow_ips="*")

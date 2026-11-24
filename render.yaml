@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: business-assistant
+    runtime: python
+    plan: free # free also works, but it sleeps after 15 min and the bot stops
+    buildCommand: pip install -r requirements.txt
+    startCommand: python dashboard.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: RUN_BOT
+        value: "1"
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_URL
+        sync: false

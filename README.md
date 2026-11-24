@@ -10,3 +10,8 @@
 Login: send /dashboard to the bot (or press the Dashboard button), enter the one-time code on the site.
 
 Files: bot.py, text_parser.py, texts.py, db.py (PostgreSQL), dashboard.py (API), static/index.html (UI), schema.sql.
+
+## Hosting (Render)
+
+One service runs both the site and the bot (`RUN_BOT=1`). See `render.yaml`.
+Do not run `python bot.py` locally while the hosted bot is running (Telegram allows one poller).
