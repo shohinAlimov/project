@@ -17,6 +17,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -73,6 +74,22 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+from growth.auth import router as growth_auth
+from growth.api import router as growth_api
+app.include_router(growth_auth)
+app.include_router(growth_api)
+app.mount("/assets", StaticFiles(directory=BASE / "static" / "growth"), name="growth-assets")
+
+
+@app.middleware("http")
+async def same_origin(request, call_next):
+    if request.url.path.startswith("/growth") and request.method not in ("GET", "HEAD"):
+        origin = request.headers.get("origin")
+        from urllib.parse import urlsplit
+        if origin and urlsplit(origin).netloc != request.headers.get("host"):
+            return Response(status_code=403)
+    return await call_next(request)
+
 
 
 async def current(request: Request):
@@ -106,6 +123,11 @@ class TxPatch(BaseModel):
 
 @app.get("/")
 async def index():
+    return FileResponse(BASE / "static" / "growth" / "workspace.html")
+
+
+@app.get("/legacy")
+async def legacy():
     return FileResponse(BASE / "static" / "index.html")
 
 

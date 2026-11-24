@@ -334,13 +334,29 @@ async def edit_field(c: CallbackQuery, state: FSMContext):
     await c.message.answer(t(lang, "ask_value"))
 
 
+async def run_polling():
+    from growth.telegram import pilot_polling, router as business_router
+    if os.getenv("BUSINESS_ONLY")=="1":
+        return await pilot_polling()
+    bot = Bot(os.environ["BOT_TOKEN"])
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_routers(business_router, router)
+    try:
+        await dp.start_polling(bot, handle_as_tasks=False, handle_signals=False)
+    finally:
+        # A supervisor can reattach both routers after a transient startup failure.
+        for child in (business_router, router):
+            dp.sub_routers.remove(child)
+            child._parent_router = None
+
+
 async def main():
     logging.basicConfig(level=logging.INFO)
     await db.init()
-    bot = Bot(os.environ["BOT_TOKEN"])
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
-    await dp.start_polling(bot)
+    try:
+        await run_polling()
+    finally:
+        await db.close()
 
 
 if __name__ == "__main__":
