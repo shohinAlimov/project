@@ -1,5 +1,6 @@
 # Secrets (never commit)
 .env
+_.env
 .env.*
 !.env.example
 
