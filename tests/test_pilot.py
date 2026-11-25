@@ -387,6 +387,7 @@ async def test_supabase_auth_storage_contract_and_real_shop_template(
 ):
     client, biz, admin = pilot
     user = uuid4()
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://shop.example.test/")
     monkeypatch.setenv("SUPABASE_URL", "https://dev.example.test")
     monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "publishable-fixture")
     monkeypatch.setenv("SUPABASE_STORAGE_KEY", "sb_secret_fixture")
@@ -407,6 +408,16 @@ async def test_supabase_auth_storage_contract_and_real_shop_template(
             return httpx.Response(
                 200, json={"id": str(user), "email": "pilot@example.test"}
             )
+        if path in ("/auth/v1/signup", "/auth/v1/resend"):
+            assert request.url.params["redirect_to"] == "https://shop.example.test/"
+        if path == "/auth/v1/resend":
+            import json
+
+            assert json.loads(request.content) == {
+                "type": "signup",
+                "email": "pilot@example.test",
+            }
+            return httpx.Response(200, json={})
         if path == "/auth/v1/signup":
             return httpx.Response(200, json={"id": str(user)})
         if path == "/auth/v1/token":
@@ -431,6 +442,9 @@ async def test_supabase_auth_storage_contract_and_real_shop_template(
     )
     credentials = {"email": "pilot@example.test", "password": "fixture-password"}
     assert (await call(client, "auth/signup", credentials))["confirm_email"]
+    assert (await call(client, "auth/resend", {"email": credentials["email"]}))[
+        "confirm_email"
+    ]
     assert (await call(client, "auth/login", credentials))["signed_in"]
     assert "growth_demo" not in client.cookies
     assert not (await client.get("/growth/me")).json()["memberships"]

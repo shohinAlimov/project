@@ -197,6 +197,40 @@ function close() {
   dialog.close();
   formAction = null;
 }
+// Supabase returns an implicit-auth fragment. This app uses server-side password
+// sessions. Consume the confirmation status and remove the fragment immediately.
+function confirmationStatus() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (
+    !params.has("access_token") &&
+    !params.has("error") &&
+    !params.has("error_code")
+  )
+    return "";
+  history.replaceState(null, "", location.pathname + location.search);
+  if (params.has("error") || params.has("error_code")) return "invalid";
+  return params.get("type") === "signup" ? "confirmed" : "";
+}
+let confirmation = confirmationStatus();
+let confirmationEmail = "";
+function confirmationText() {
+  if (confirmation === "invalid")
+    return t(
+      "Havola eskirgan yoki ishlatilgan. Avval kirib ko‘ring. Kerak bo‘lsa yangi xat so‘rang.",
+      "Ссылка недействительна или уже использована. Попробуйте войти. При необходимости запросите новое письмо.",
+    );
+  if (confirmation === "confirmed")
+    return t(
+      "Pochta tasdiqlandi. Email va parolingiz bilan kiring.",
+      "Почта подтверждена. Войдите со своим адресом и паролем.",
+    );
+  if (confirmation === "check")
+    return t(
+      "Oxirgi tasdiqlash xatini oching, so‘ng parolingiz bilan kiring.",
+      "Откройте самое новое письмо для подтверждения, затем войдите со своим паролем.",
+    );
+  return "";
+}
 function authPage() {
   state = null;
   root.innerHTML =
@@ -216,11 +250,14 @@ function authPage() {
       ? t("Hisob ochish", "Регистрация")
       : t("Xush kelibsiz", "Добро пожаловать")) +
     "</h2>" +
+    (confirmation
+      ? '<p class="tip" role="status">' + esc(confirmationText()) + "</p>"
+      : "") +
     form(
       field(
         "email",
         t("Elektron pochta", "Электронная почта"),
-        "",
+        confirmationEmail,
         "email",
         true,
       ) + field("password", t("Parol", "Пароль"), "", "password", true),
@@ -234,6 +271,13 @@ function authPage() {
         : t("Hisob ochish", "Создать аккаунт"),
       "textbtn",
     ) +
+    (!signup && config.auth
+      ? btn(
+          "resendConfirmation",
+          t("Tasdiqlash xatini qayta yuborish", "Отправить письмо ещё раз"),
+          "textbtn",
+        )
+      : "") +
     (config.demo
       ? btn("demo", t("Demo do‘konni ochish", "Открыть демомагазин"), "soft")
       : "") +
@@ -1138,6 +1182,14 @@ const actions = {
     menuOpen = !menuOpen;
     render();
   },
+  resendConfirmation: async () => {
+    const input = root.querySelector('input[name="email"]');
+    if (!input.reportValidity()) return;
+    await api("auth/resend", "POST", { email: input.value.trim() });
+    confirmationEmail = input.value.trim();
+    confirmation = "check";
+    authPage();
+  },
   switchAuth: async () => {
     signup = !signup;
     authPage();
@@ -1428,15 +1480,15 @@ document.addEventListener("submit", async (e) => {
     } else if (f.closest(".entry")) {
       const res = await api("auth/" + (signup ? "signup" : "login"), "POST", o);
       if (res.confirm_email) {
-        notice(
-          t(
-            "Pochtangizni tasdiqlang, keyin kiring.",
-            "Подтвердите почту, затем войдите.",
-          ),
-        );
+        confirmation = "check";
+        confirmationEmail = o.email;
         signup = false;
         authPage();
-      } else await boot();
+      } else {
+        confirmation = "";
+        confirmationEmail = "";
+        await boot();
+      }
     } else if (f.closest(".sheet")) {
       const r = await api("onboard", "POST", o);
       member = r.id;

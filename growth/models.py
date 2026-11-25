@@ -102,8 +102,11 @@ class Pause(Model):
     paused: bool
 
 
-class Credentials(Model):
+class AccountEmail(Model):
     email: Name
+
+
+class Credentials(AccountEmail):
     password: str = Field(min_length=6, max_length=200)
 
 

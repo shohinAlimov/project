@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
 
 import db
-from .models import Credentials
+from .models import AccountEmail, Credentials
 
 router = APIRouter(prefix="/growth")
 secret = (os.getenv("SESSION_SECRET") or secrets.token_hex(32)).encode()
@@ -48,6 +48,8 @@ async def auth_call(method, path, **kwargs):
             )
         except httpx.HTTPError:
             raise HTTPException(503, "Authentication service unavailable")
+    if r.status_code == 429:
+        raise HTTPException(429, "Too many requests. Please try again later.")
     if not r.is_success:
         raise HTTPException(
             401 if r.status_code in (400, 401, 403, 422) else 503,
@@ -62,6 +64,23 @@ def session(response, data):
     response.delete_cookie("growth_demo")
 
 
+def confirmation_redirect():
+    # Use the operator-configured URL, independent of client request headers.
+    site = os.getenv("PUBLIC_APP_URL", "").rstrip("/")
+    return {"redirect_to": site + "/"} if site else {}
+
+
+@router.post("/auth/resend")
+async def resend_confirmation(body: AccountEmail):
+    await auth_call(
+        "POST",
+        "resend",
+        params=confirmation_redirect(),
+        json={"type": "signup", "email": body.email},
+    )
+    return {"confirm_email": True}
+
+
 @router.post("/auth/{action}")
 async def signin(action: str, body: Credentials, response: Response):
     if action not in ("login", "signup"):
@@ -69,6 +88,7 @@ async def signin(action: str, body: Credentials, response: Response):
     data = await auth_call(
         "POST",
         "signup" if action == "signup" else "token?grant_type=password",
+        params=confirmation_redirect() if action == "signup" else None,
         json=body.model_dump(),
     )
     if data.get("access_token"):
