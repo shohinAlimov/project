@@ -709,3 +709,40 @@ async def test_assistant_history_context_and_roles(pilot, monkeypatch):
     )
     client.cookies.clear()
     assert (await client.get("/growth/assistant/history")).status_code == 401
+
+
+async def test_native_gemini_context_and_json(monkeypatch):
+    seen = []
+
+    async def handler(request):
+        seen.append(json.loads(request.content))
+        assert request.url.path == "/v1beta/models/gemini-2.5-flash:generateContent"
+        return httpx.Response(
+            200,
+            json={"candidates": [{"content": {"parts": [{"text": '{"amount":5}'}]}}]},
+        )
+
+    real = httpx.AsyncClient
+    monkeypatch.setenv(
+        "LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+    monkeypatch.setenv("LLM_TEXT_MODEL", "gemini-2.5-flash")
+    monkeypatch.setenv("LLM_API_KEY", "fixture-key")
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    result = await media.completion(
+        "Read it.",
+        "Now?",
+        True,
+        history=[
+            {"role": "user", "content": "Before"},
+            {"role": "assistant", "content": "Earlier answer"},
+        ],
+    )
+    assert result == {"amount": 5}
+    assert [m["role"] for m in seen[0]["contents"]] == ["user", "model", "user"]
+    assert len(seen[0]["systemInstruction"]["parts"]) == 1
+    assert seen[0]["generationConfig"]["responseMimeType"] == "application/json"
