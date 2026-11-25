@@ -81,19 +81,12 @@ h3 {
   gap: 0.7rem;
 }
 .mark {
-  width: 34px;
-  height: 34px;
-  background: var(--leaf);
-  display: inline-grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 6px;
-  transform: rotate(-4deg);
+  width: 40px;
+  height: 40px;
+  display: block;
+  flex: 0 0 40px;
+  object-fit: contain;
   border-radius: 10px;
-}
-.mark i {
-  background: var(--green);
-  border-radius: 65% 0;
 }
 .muted,
 small {

@@ -72,7 +72,7 @@ const today = () =>
     new Date(),
   );
 const mark =
-  '<span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
+  '<img class="mark" src="/assets/oysha-logo.png" alt="" aria-hidden="true" width="40" height="40">';
 const wordmark = '<div class="wordmark">' + mark + "Oysha</div>";
 const btn = (act, label, cls = "button", id = "") =>
   '<button type="button" class="' +
@@ -347,9 +347,6 @@ function authPage() {
           t("Tasdiqlash xatini qayta yuborish", "Отправить письмо ещё раз"),
           "textbtn",
         )
-      : "") +
-    (config.demo
-      ? btn("demo", t("Demo do‘konni ochish", "Открыть демомагазин"), "soft")
       : "") +
     '</div><a href="/legacy">' +
     t(
@@ -1767,10 +1764,6 @@ const actions = {
   switchAuth: async () => {
     signup = !signup;
     authPage();
-  },
-  demo: async () => {
-    await api("demo", "POST");
-    await boot();
   },
   logout: async () => {
     await api("logout", "POST");
