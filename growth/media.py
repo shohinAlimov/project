@@ -171,10 +171,10 @@ async def gemini_request(client, key, body):
     )
 
 
-async def openai(path, body):
+async def openai(path, body, fallback=False):
     # Image generation always uses OpenAI. Text and vision go to the configured provider,
     # so a Gemini key can never be sent to OpenAI's image endpoint or the reverse.
-    if path.startswith("images/"):
+    if path.startswith("images/") or fallback:
         key, base = os.getenv("OPENAI_API_KEY"), OPENAI_BASE
     else:
         key, base = text_key(), os.getenv("LLM_BASE_URL") or OPENAI_BASE
@@ -210,6 +210,20 @@ async def openai(path, body):
                         raise HTTPException(503, "AI returned no text")
                     return {"choices": [{"message": {"content": text}}]}
                 return r.json()
+            if (
+                native
+                and r.status_code in (404, 429, 500, 502, 503, 504)
+                and os.getenv("OPENAI_API_KEY")
+            ):
+                logging.warning(
+                    "Gemini unavailable (HTTP %s), trying configured OpenAI text provider",
+                    r.status_code,
+                )
+                return await openai(
+                    path,
+                    {**body, "model": os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")},
+                    fallback=True,
+                )
             model = str(body.get("model", ""))
             safe_model = (
                 model

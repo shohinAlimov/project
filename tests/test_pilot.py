@@ -746,3 +746,35 @@ async def test_native_gemini_context_and_json(monkeypatch):
     assert [m["role"] for m in seen[0]["contents"]] == ["user", "model", "user"]
     assert len(seen[0]["systemInstruction"]["parts"]) == 1
     assert seen[0]["generationConfig"]["responseMimeType"] == "application/json"
+
+
+async def test_gemini_failure_uses_own_openai_key(monkeypatch):
+    seen = []
+
+    async def handler(request):
+        seen.append(request)
+        if request.url.host == "generativelanguage.googleapis.com":
+            assert request.headers["x-goog-api-key"] == "gemini-fixture"
+            return httpx.Response(503)
+        assert request.url.host == "api.openai.com"
+        assert request.headers["authorization"] == "Bearer openai-fixture"
+        assert json.loads(request.content)["model"] == "gpt-4o-mini"
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "Available answer"}}]}
+        )
+
+    real = httpx.AsyncClient
+    monkeypatch.setenv(
+        "LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+    monkeypatch.setenv("LLM_API_KEY", "gemini-fixture")
+    monkeypatch.setenv("LLM_TEXT_MODEL", "gemini-flash-latest")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-fixture")
+    monkeypatch.setenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    assert await media.completion("Help", "Question") == "Available answer"
+    assert len(seen) == 2
