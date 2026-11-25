@@ -199,7 +199,16 @@ def payment_notice(lang, fields, customer):
 
 
 async def handle(
-    c, connection, chat, message_id, sender, text, load_image, send, from_bot=False, outbox=None
+    c,
+    connection,
+    chat,
+    message_id,
+    sender,
+    text,
+    load_image,
+    send,
+    from_bot=False,
+    outbox=None,
 ):
     await context(c, "connection", connection)
     mapping = await c.fetchrow(
@@ -243,7 +252,9 @@ async def handle(
             )
             if outbox is not None and fresh > before:
                 fields = json.loads(
-                    await c.fetchval("select fields from growth.receipts where id=$1", rid)
+                    await c.fetchval(
+                        "select fields from growth.receipts where id=$1", rid
+                    )
                 )
                 outbox.append(
                     (
@@ -359,7 +370,11 @@ async def pilot_polling():
                 GetUpdates(
                     offset=offset,
                     timeout=25,
-                    allowed_updates=["business_connection", "business_message"],
+                    allowed_updates=[
+                        "business_connection",
+                        "business_message",
+                        "message",
+                    ],
                 )
             )
             for u in updates:
@@ -368,6 +383,10 @@ async def pilot_polling():
                     try:
                         if u.business_connection:
                             await connection_changed(u.business_connection)
+                        if u.message:
+                            from .uploads import incoming
+
+                            await incoming(u.message.as_(bot))
                         if u.business_message:
                             await business_message(u.business_message.as_(bot))
                         break
@@ -376,6 +395,10 @@ async def pilot_polling():
                         TelegramBadRequest,
                         HTTPException,
                     ) as error:
+                        if u.message and isinstance(
+                            error, (TelegramForbiddenError, TelegramBadRequest)
+                        ):
+                            break
                         m = u.business_message
                         if not m or (
                             isinstance(error, HTTPException)

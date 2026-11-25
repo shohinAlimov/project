@@ -18,3 +18,6 @@ grant execute on function growth.record_site_visit(date,text) to :"runtime_role"
 revoke all on growth.site_visitors,growth.developer_statistics,growth.analytics_daily from :"runtime_role";
 
 grant select,insert on growth.assistant_turns to :"runtime_role";
+
+grant select,insert,delete on growth.telegram_upload_links to :"runtime_role";
+grant update(token_hash,expires,telegram_id) on growth.telegram_upload_links to :"runtime_role";

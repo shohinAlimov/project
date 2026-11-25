@@ -78,6 +78,8 @@ from growth.auth import router as growth_auth
 from growth.api import router as growth_api
 app.include_router(growth_auth)
 app.include_router(growth_api)
+from growth.uploads import api as upload_api
+app.include_router(upload_api)
 from growth.platform_metrics import track_visit
 app.middleware("http")(track_visit)
 app.mount("/assets", StaticFiles(directory=BASE / "static" / "growth"), name="growth-assets")

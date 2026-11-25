@@ -8,7 +8,8 @@ let lang = localStorage.getItem("language") || "uz",
   isDemo = false,
   config = {},
   memberships = [],
-  menuOpen = false;
+  menuOpen = false,
+  chatOpen = false;
 let signup = false,
   noticeTimer,
   formAction,
@@ -36,7 +37,7 @@ const today = () =>
   );
 const mark =
   '<span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>';
-const wordmark = '<div class="wordmark">' + mark + "AI Growth Assistant</div>";
+const wordmark = '<div class="wordmark">' + mark + "Oysha</div>";
 const btn = (act, label, cls = "button", id = "") =>
   '<button type="button" class="' +
   cls +
@@ -201,6 +202,7 @@ function modalForm(title, content, action, label) {
 function close() {
   dialog.close();
   formAction = null;
+  requestAnimationFrame(showTour);
 }
 // Supabase returns an implicit-auth fragment. This app uses server-side password
 // sessions. Consume the confirmation status and remove the fragment immediately.
@@ -238,6 +240,9 @@ function confirmationText() {
 }
 function authPage() {
   state = null;
+  document.querySelector(".tourLayer")?.remove();
+  document.body.classList.remove("overlayOpen");
+  chatOpen = false;
   root.innerHTML =
     '<main class="entry"><section class="cover">' +
     wordmark +
@@ -528,6 +533,12 @@ function txList(rows) {
   );
 }
 function trend() {
+  if (!state.week_income?.length)
+    return (
+      '<p class="blank">' +
+      t("Bu hafta hali tushum yo‘q.", "На этой неделе поступлений пока нет.") +
+      "</p>"
+    );
   const rows = state.week_income || [],
     days = [];
   for (let i = 6; i >= 0; i--) {
@@ -561,7 +572,6 @@ function trend() {
 }
 function overview() {
   return (
-    assistant() +
     metrics() +
     '<div class="cols">' +
     (state.figures
@@ -633,9 +643,14 @@ function finances() {
     '<div class="actions">' +
     btn("entry", t("Daromad qo‘shish", "Добавить доход"), "button", "income") +
     btn("entry", t("Xarajat qo‘shish", "Добавить расход"), "plain", "expense") +
+    '<details class="moreActions"><summary>' +
+    t("Yana", "Ещё") +
+    '</summary><div class="actions">' +
     btn("upload", t("Chek yuklash", "Загрузить чек"), "plain") +
+    btn("telegramUpload", t("Telegram orqali", "Через Telegram"), "soft") +
+    btn("refreshData", t("Yangilash", "Обновить"), "plain") +
     btn("order", t("Buyurtma yaratish", "Создать заказ"), "plain") +
-    "</div><br>" +
+    "</div></details></div><br>" +
     panel(
       t("Qabul qilingan cheklar", "Полученные чеки"),
       list(state.receipts, (r) =>
@@ -1049,7 +1064,7 @@ async function sendChat(question, monthly = false) {
   } finally {
     if (chatPending === request) {
       chatPending = null;
-      if (state && ["overview", "assistant"].includes(page)) render();
+      if (state) render();
     }
   }
 }
@@ -1102,38 +1117,149 @@ function guideSteps() {
   return steps.filter(([key]) => allowed().includes(key));
 }
 function guideKey() {
-  return "growth-guide-v1:" + state.id + ":" + state.role;
+  return "growth-spotlight-v2:" + state.id + ":" + state.role;
 }
 function guide() {
-  if (localStorage.getItem(guideKey()) === "done") return "";
-  const steps = guideSteps();
-  const [target, text] = steps[guideStep] || steps[0];
-  return (
-    '<section class="panel guide" aria-label="' +
-    t("Boshlash uchun yordam", "Подсказки для начала работы") +
-    '"><div class="head"><h2>' +
-    esc(t("Qisqa tanishuv", "Короткое знакомство")) +
-    " · " +
-    (guideStep + 1) +
-    "/" +
-    steps.length +
-    "</h2>" +
-    btn("guideDone", t("Yopish", "Закрыть"), "textbtn") +
-    "</div><p>" +
-    esc(text) +
-    '</p><div class="actions">' +
-    (page !== target
-      ? btn("guideOpen", pages()[target][1], "soft", target)
-      : "") +
-    btn(
-      "guideNext",
-      guideStep === steps.length - 1
-        ? t("Tayyor", "Готово")
-        : t("Keyingi", "Далее"),
-    ) +
-    "</div></section>"
-  );
+  return "";
 }
+function tourSteps() {
+  const steps = [];
+  if (innerWidth <= 850)
+    steps.push({
+      selector: '.top [data-act="menu"]',
+      text: t(
+        "Bo‘limlarni shu yerdan oching.",
+        "Здесь открывается меню разделов.",
+      ),
+    });
+  if (allowed().includes("production")) {
+    steps.push({
+      selector: '[data-act="nav"][data-id="production"]',
+      text: t(
+        "Mahsulot katalogini oching.",
+        "Откройте каталог товаров через меню.",
+      ),
+    });
+    steps.push({
+      page: "production",
+      selector: '[data-act="product"]',
+      text: t(
+        "Birinchi mahsulotingizni shu tugma bilan qo‘shing.",
+        "Эта кнопка добавляет товар. Попробуйте открыть карточку.",
+      ),
+    });
+  }
+  if (allowed().includes("finances"))
+    steps.push({
+      page: "finances",
+      selector: '[data-act="telegramUpload"]',
+      text: t(
+        "Telegramni ulang va chek rasmlarini botga yuboring.",
+        "Привяжите Telegram, чтобы отправлять скриншоты боту. Они появятся здесь для проверки.",
+      ),
+    });
+  steps.push({
+    selector: '[data-act="chatOpen"]',
+    text: t(
+      "Yordamchi doim shu yerda. Suhbatni oching.",
+      "Помощник всегда под рукой. Нажмите, чтобы открыть чат.",
+    ),
+  });
+  return steps;
+}
+function showTour() {
+  document.querySelector(".tourLayer")?.remove();
+  if (
+    !state ||
+    dialog.open ||
+    chatOpen ||
+    localStorage.getItem(guideKey()) === "done"
+  )
+    return;
+  const steps = tourSteps(),
+    step = steps[guideStep];
+  if (!step) return;
+  if (step.page && page !== step.page) {
+    page = step.page;
+    menuOpen = false;
+    render();
+    return;
+  }
+  const target = root.querySelector(step.selector);
+  if (
+    step.selector.includes('data-act="nav"') &&
+    innerWidth <= 850 &&
+    !menuOpen
+  ) {
+    menuOpen = true;
+    render();
+    return;
+  }
+  if (!target || !target.getClientRects().length) return;
+  if (target.closest("details")) target.closest("details").open = true;
+  target.scrollIntoView({ block: "center", behavior: "instant" });
+  const r = target.getBoundingClientRect(),
+    pad = 5;
+  const left = Math.max(4, r.left - pad),
+    top = Math.max(4, r.top - pad);
+  const right = Math.min(innerWidth - 4, r.right + pad),
+    bottom = Math.min(innerHeight - 4, r.bottom + pad);
+  const layer = document.createElement("div");
+  layer.className = "tourLayer";
+  const rect = (x, y, w, h) =>
+    '<div class="tourShade" style="left:' +
+    x +
+    "px;top:" +
+    y +
+    "px;width:" +
+    w +
+    "px;height:" +
+    h +
+    'px"></div>';
+  layer.innerHTML =
+    rect(0, 0, innerWidth, top) +
+    rect(0, bottom, innerWidth, innerHeight - bottom) +
+    rect(0, top, left, bottom - top) +
+    rect(right, top, innerWidth - right, bottom - top) +
+    '<div class="tourHole" style="left:' +
+    left +
+    "px;top:" +
+    top +
+    "px;width:" +
+    (right - left) +
+    "px;height:" +
+    (bottom - top) +
+    'px"></div>' +
+    '<section class="tourTip" role="dialog" aria-label="' +
+    t("Yo‘l-yo‘riq", "Знакомство с платформой") +
+    '" style="left:' +
+    Math.max(12, Math.min(left, innerWidth - 332)) +
+    "px;top:" +
+    (bottom + 220 < innerHeight ? bottom + 14 : Math.max(12, top - 215)) +
+    'px">' +
+    "<small>" +
+    (guideStep + 1) +
+    " / " +
+    steps.length +
+    "</small><p>" +
+    esc(step.text) +
+    '</p><div class="actions">' +
+    btn("guideTry", t("Sinab ko‘rish", "Попробовать")) +
+    btn("guideNext", t("Keyingi", "Далее"), "plain") +
+    btn("guideDone", t("Yopish", "Закрыть"), "textbtn") +
+    "</div></section>";
+  document.body.append(layer);
+}
+window.addEventListener("resize", () => {
+  if (state) showTour();
+});
+window.addEventListener(
+  "scroll",
+  () => {
+    if (document.querySelector(".tourLayer")) showTour();
+  },
+  { passive: true },
+);
 function render() {
   document.documentElement.lang = lang;
   const p = pages();
@@ -1142,17 +1268,23 @@ function render() {
     finances,
     marketing,
     production,
-    assistant,
+    assistant: () => "",
     inbox,
     settings,
     billing,
   }[page]();
   root.innerHTML =
+    (menuOpen
+      ? '<button class="menuBackdrop" data-act="menu" aria-label="Закрыть меню"></button>'
+      : "") +
     '<div class="frame"><aside class="sidebar ' +
     (menuOpen ? "open" : "") +
     '"><div class="toolrow">' +
     wordmark +
     btn("menu", "☰", "mobilemenu") +
+    '</div><div class="sidebarTools">' +
+    langs() +
+    btn("guideRestart", t("Yordam", "Подсказки"), "plain") +
     '</div><nav class="nav">' +
     allowed()
       .map(
@@ -1171,8 +1303,24 @@ function render() {
     '</nav><div class="sidebottom"><b>' +
     esc(state.name) +
     "</b><small>" +
-    esc(state.role) +
-    '</small></div></aside><main class="main"><div class="toolrow top"><div class="row"><b>' +
+    esc(
+      state.role === "owner"
+        ? t("Egasi", "Владелец")
+        : state.role === "finance"
+          ? t("Moliyachi", "Финансист")
+          : t("Marketolog", "Маркетолог"),
+    ) +
+    "</small>" +
+    btn("logout", t("Chiqish", "Выйти"), "plain") +
+    "</div></aside>" +
+    (menuOpen
+      ? '<button class="menuBackdrop" data-act="menu" aria-label="' +
+        t("Menyuni yopish", "Закрыть меню") +
+        '"></button>'
+      : "") +
+    '<main class="main"><div class="toolrow top"><div class="row">' +
+    btn("menu", "☰", "mobilemenu") +
+    "<b>" +
     esc(state.name) +
     "</b>" +
     (state.demo
@@ -1190,9 +1338,7 @@ function render() {
           member,
         )
       : "") +
-    langs() +
-    btn("guideRestart", t("Yordam", "Подсказки"), "plain") +
-    btn("logout", t("Chiqish", "Выйти"), "plain") +
+    "" +
     '</div></div><div class="head"><h1 class="title">' +
     p[page][1] +
     '</h1><span class="muted">' +
@@ -1204,7 +1350,33 @@ function render() {
     "</span></div>" +
     guide() +
     body +
-    "</main></div>";
+    "</main></div>" +
+    btn("chatOpen", t("Yordamchi", "Помощник"), "chatLauncher") +
+    '<dialog id="chatWindow" class="chatWindow" aria-label="' +
+    t("Shaxsiy yordamchi", "Личный помощник") +
+    '"><header>' +
+    wordmark +
+    btn("chatClose", "×", "plain") +
+    "</header>" +
+    assistant() +
+    "</dialog>";
+  const chatWindow = root.querySelector("#chatWindow");
+  if (chatOpen) {
+    chatWindow.showModal();
+    chatWindow.querySelector("textarea").focus();
+  }
+  chatWindow.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    actions.chatClose();
+  });
+  chatWindow.addEventListener("click", (e) => {
+    if (e.target === chatWindow) actions.chatClose();
+  });
+  document.body.classList.toggle("overlayOpen", chatOpen || menuOpen);
+  root.querySelectorAll('[data-act="menu"]').forEach((b) => {
+    b.setAttribute("aria-label", t("Menyu", "Меню"));
+    b.setAttribute("aria-expanded", String(menuOpen));
+  });
   const log = root.querySelector(".chatLog");
   if (log) log.scrollTop = log.scrollHeight;
   root.querySelector("[data-chat] textarea")?.addEventListener("input", (e) => {
@@ -1216,6 +1388,7 @@ function render() {
       .forEach((b) => {
         b.disabled = true;
       });
+  requestAnimationFrame(showTour);
 }
 function editProduct(id) {
   const p = state.products.find((p) => p.id === id) || {},
@@ -1344,6 +1517,53 @@ function entry(kind, r = null) {
   );
 }
 const actions = {
+  chatOpen: () => {
+    chatOpen = true;
+    menuOpen = false;
+    render();
+  },
+  chatClose: () => {
+    chatOpen = false;
+    render();
+  },
+  refreshData: () => loadState(),
+  telegramUpload: async () => {
+    const connection = await api("telegram-uploads");
+    const result = await api("telegram-uploads/link", "POST");
+    modal.innerHTML =
+      "<h2>" +
+      t("Telegram orqali cheklar", "Скриншоты через Telegram") +
+      "</h2><p>" +
+      t(
+        "Botni oching va Start tugmasini bosing. Keyin chek rasmini yuboring. Havola 15 daqiqa amal qiladi.",
+        "Откройте бота и нажмите Start. Затем отправьте фото или скриншот чека. Ссылка действует 15 минут.",
+      ) +
+      '</p><a class="button" target="_blank" rel="noopener" href="' +
+      esc(result.url) +
+      '">' +
+      t("Botni ochish", "Открыть бота") +
+      "</a><p>" +
+      t(
+        "Daromad uchun rasmga «daromad» deb yozing. Natijani Moliya bo‘limida tekshiring.",
+        "Для поступления подпишите фото «доход», иначе создаётся черновик расхода. После отправки обновите Финансы и проверьте данные.",
+      ) +
+      "</p>";
+    if (connection.connected)
+      modal.insertAdjacentHTML(
+        "beforeend",
+        "<p>" +
+          t("Telegram ulangan.", "Telegram уже подключён.") +
+          "</p>" +
+          btn("telegramDisconnect", t("Uzish", "Отключить Telegram"), "plain"),
+      );
+    dialog.showModal();
+    document.querySelector(".tourLayer")?.remove();
+  },
+  telegramDisconnect: async () => {
+    await api("telegram-uploads/link", "DELETE");
+    close();
+    notice(t("Telegram uzildi", "Telegram отключён"));
+  },
   guideDone: () => {
     localStorage.setItem(guideKey(), "done");
     render();
@@ -1351,24 +1571,19 @@ const actions = {
   guideRestart: () => {
     localStorage.removeItem(guideKey());
     guideStep = 0;
-    page = "overview";
-    render();
-  },
-  guideOpen: (target) => {
-    page = target;
-    render();
-  },
-  guideNext: () => {
-    const steps = guideSteps();
-    if (guideStep === steps.length - 1)
-      localStorage.setItem(guideKey(), "done");
-    else {
-      guideStep++;
-      page = steps[guideStep][0];
-    }
+    chatOpen = false;
     menuOpen = false;
     render();
-    window.scrollTo(0, 0);
+  },
+  guideTry: () => {
+    const step = tourSteps()[guideStep];
+    root.querySelector(step.selector)?.click();
+  },
+  guideNext: () => {
+    if (guideStep === tourSteps().length - 1)
+      localStorage.setItem(guideKey(), "done");
+    else guideStep++;
+    render();
   },
   lang: async (id) => {
     lang = id;
@@ -1378,6 +1593,12 @@ const actions = {
     else authPage();
   },
   nav: async (id) => {
+    if (id === "assistant") {
+      chatOpen = true;
+      menuOpen = false;
+      render();
+      return;
+    }
     page = id;
     menuOpen = false;
     render();
@@ -1673,7 +1894,9 @@ document.addEventListener("submit", async (e) => {
   const fd = new FormData(f),
     o = Object.fromEntries(fd);
   try {
-    if (dialog.contains(f)) {
+    if (f.hasAttribute("data-chat")) {
+      await sendChat(o.question);
+    } else if (dialog.contains(f)) {
       await formAction(o, fd);
       close();
       await loadState();
@@ -1694,8 +1917,6 @@ document.addEventListener("submit", async (e) => {
       member = r.id;
       localStorage.setItem("language", o.language);
       await boot();
-    } else if (f.hasAttribute("data-chat")) {
-      await sendChat(o.question);
     } else if (page === "inbox") {
       const r = await api("demo-message", "POST", o);
       simulation = r.reply || t("Egasiga yuborildi", "Передано владельцу");
@@ -1709,4 +1930,66 @@ document.addEventListener("submit", async (e) => {
 });
 boot().catch((err) => {
   root.textContent = err.message;
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && menuOpen && state) {
+    menuOpen = false;
+    render();
+  } else if (e.key === "Escape" && document.querySelector(".tourLayer"))
+    actions.guideDone();
+});
+
+document.addEventListener(
+  "click",
+  (e) => {
+    if (!state || !document.querySelector(".tourLayer")) return;
+    const step = tourSteps()[guideStep];
+    if (!step || !e.target.closest(step.selector)) return;
+    if (guideStep === tourSteps().length - 1)
+      localStorage.setItem(guideKey(), "done");
+    else guideStep++;
+    document.querySelector(".tourLayer")?.remove();
+  },
+  true,
+);
+document.addEventListener("keydown", (e) => {
+  if (
+    e.key !== "Tab" ||
+    !menuOpen ||
+    !state ||
+    document.querySelector("dialog[open]")
+  )
+    return;
+  const items = [
+    ...root.querySelectorAll(".sidebar button, .sidebar a, .sidebar select"),
+  ].filter((el) => el.getClientRects().length);
+  const first = items[0],
+    last = items.at(-1);
+  if (
+    e.shiftKey &&
+    (document.activeElement === first ||
+      !root.querySelector(".sidebar").contains(document.activeElement))
+  ) {
+    e.preventDefault();
+    last?.focus();
+  } else if (
+    !e.shiftKey &&
+    (document.activeElement === last ||
+      !root.querySelector(".sidebar").contains(document.activeElement))
+  ) {
+    e.preventDefault();
+    first?.focus();
+  }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (
+    document.visibilityState === "visible" &&
+    state &&
+    page === "finances" &&
+    !dialog.open &&
+    !chatOpen
+  )
+    loadState().catch((err) => notice(err.message));
 });

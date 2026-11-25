@@ -340,12 +340,13 @@ async def run_polling():
         return await pilot_polling()
     bot = Bot(os.environ["BOT_TOKEN"])
     dp = Dispatcher(storage=MemoryStorage())
-    dp.include_routers(business_router, router)
+    from growth.uploads import router as upload_router
+    dp.include_routers(upload_router, business_router, router)
     try:
         await dp.start_polling(bot, handle_as_tasks=False, handle_signals=False)
     finally:
         # A supervisor can reattach both routers after a transient startup failure.
-        for child in (business_router, router):
+        for child in (upload_router, business_router, router):
             dp.sub_routers.remove(child)
             child._parent_router = None
 

@@ -782,3 +782,62 @@ async def test_gemini_failure_uses_own_openai_key(monkeypatch):
         await media.completion("Help", "Question", resilient=True) == "Available answer"
     )
     assert len(seen) == 2
+
+
+async def test_personal_telegram_screenshot_delivery(pilot):
+    from growth.uploads import incoming
+    from types import SimpleNamespace
+    import hashlib
+
+    client, biz, c = pilot
+    subject = await c.fetchval(
+        "select subject from growth.members where business_id=$1", biz
+    )
+    token = "fixture-upload-token"
+    await c.execute(
+        "insert into growth.telegram_upload_links values($1,$2,$3,now()+interval '15 minutes',null)",
+        biz,
+        subject,
+        hashlib.sha256(token.encode()).hexdigest(),
+    )
+    replies = []
+
+    async def reply(text):
+        replies.append(text)
+
+    async def download(asset, destination):
+        destination.write(png("pink"))
+
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="private"),
+        from_user=SimpleNamespace(id=123456),
+        text="/start upload_" + token,
+        answer=reply,
+    )
+    await incoming(message)
+    assert (
+        await c.fetchval(
+            "select telegram_id from growth.telegram_upload_links where business_id=$1",
+            biz,
+        )
+        == 123456
+    )
+    await incoming(message)
+    assert "истекла" in replies[-1]
+    message.text = None
+    message.photo = [SimpleNamespace(file_size=100)]
+    message.document = None
+    message.caption = "доход"
+    message.bot = SimpleNamespace(download=download)
+    await incoming(message)
+    await incoming(message)
+    rows = (await state(client))["receipts"]
+    assert len(rows) == 1 and rows[0]["kind"] == "income"
+    assert (await client.get("/growth/files/" + rows[0]["file_id"])).content == png(
+        "pink"
+    )
+    assert (await state(client))["journal"] == []
+    assert (await client.get("/growth/telegram-uploads")).json()["connected"]
+    assert (await client.delete("/growth/telegram-uploads/link")).is_success
+    await incoming(message)
+    assert "Сначала подключите" in replies[-1]
