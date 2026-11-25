@@ -1126,7 +1126,7 @@ select:focus-visible {
 .sheet {
   animation: oysha-enter 320ms var(--motion-ease);
 }
-.chatWindow[open]::backdrop,
+.chatWindow.motionEntering[open]::backdrop,
 #dialog[open]::backdrop {
   animation: oysha-dim 220ms ease;
 }
@@ -1167,4 +1167,9 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+.chatWindow.motionLeaving::backdrop,
+#dialog.motionLeaving::backdrop {
+  animation: oysha-dim 160ms ease reverse forwards;
 }

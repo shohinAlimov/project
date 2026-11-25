@@ -234,6 +234,7 @@ function modalForm(title, content, action, label) {
   modal.innerHTML = "<h2>" + esc(title) + "</h2>" + form(content, label);
   formAction = action;
   if (!dialog.open) {
+    dialog.classList.remove("motionLeaving");
     dialog.showModal();
     motion(dialog, [
       { opacity: 0, transform: "translateY(14px) scale(.98)" },
@@ -244,6 +245,7 @@ function modalForm(title, content, action, label) {
 async function close() {
   if (dialogClosing || !dialog.open) return;
   dialogClosing = true;
+  dialog.classList.add("motionLeaving");
   await motion(
     dialog,
     [
@@ -253,6 +255,7 @@ async function close() {
     160,
   );
   dialog.close();
+  dialog.classList.remove("motionLeaving");
   dialogClosing = false;
   formAction = null;
   requestAnimationFrame(showTour);
@@ -1433,6 +1436,7 @@ function render() {
     "</dialog>";
   const chatWindow = root.querySelector("#chatWindow");
   if (chatOpen) {
+    chatWindow.classList.toggle("motionEntering", openingChat);
     chatWindow.showModal();
     chatWindow.querySelector("textarea").focus();
   }
@@ -1649,6 +1653,7 @@ const actions = {
   chatClose: async () => {
     if (chatClosing) return;
     chatClosing = true;
+    root.querySelector("#chatWindow")?.classList.add("motionLeaving");
     await motion(
       root.querySelector("#chatWindow"),
       [
