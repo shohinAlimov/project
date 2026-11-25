@@ -40,6 +40,7 @@ async def answer(data, question, language, monthly, rows):
             ensure_ascii=False,
         ),
         history=history,
+        resilient=True,
     )
     if not isinstance(text, str) or not text.strip():
         raise HTTPException(503, "AI returned an empty response. Please try again.")

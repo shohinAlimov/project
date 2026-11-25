@@ -664,7 +664,9 @@ async def test_assistant_history_context_and_roles(pilot, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "fixture-key")
     seen = []
 
-    async def completion(instruction, content, structured=False, history=None):
+    async def completion(
+        instruction, content, structured=False, history=None, **kwargs
+    ):
         seen.append({"records": json.loads(content)["records"], "history": history})
         return "Медовик — 90 000 UZS. Начни с проверки открытых оплат."
 
@@ -776,5 +778,7 @@ async def test_gemini_failure_uses_own_openai_key(monkeypatch):
         "AsyncClient",
         lambda **kwargs: real(transport=httpx.MockTransport(handler), **kwargs),
     )
-    assert await media.completion("Help", "Question") == "Available answer"
+    assert (
+        await media.completion("Help", "Question", resilient=True) == "Available answer"
+    )
     assert len(seen) == 2

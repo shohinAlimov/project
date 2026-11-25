@@ -171,7 +171,7 @@ async def gemini_request(client, key, body):
     )
 
 
-async def openai(path, body, fallback=False):
+async def openai(path, body, fallback=False, allow_fallback=False):
     # Image generation always uses OpenAI. Text and vision go to the configured provider,
     # so a Gemini key can never be sent to OpenAI's image endpoint or the reverse.
     if path.startswith("images/") or fallback:
@@ -212,6 +212,7 @@ async def openai(path, body, fallback=False):
                 return r.json()
             if (
                 native
+                and allow_fallback
                 and r.status_code in (404, 429, 500, 502, 503, 504)
                 and os.getenv("OPENAI_API_KEY")
             ):
@@ -261,7 +262,9 @@ def parse_json(text):
     return json.loads(text)
 
 
-async def completion(instruction, content, structured=False, history=None):
+async def completion(
+    instruction, content, structured=False, history=None, resilient=False
+):
     body = {
         "model": os.getenv("LLM_TEXT_MODEL")
         or os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini"),
@@ -276,7 +279,7 @@ async def completion(instruction, content, structured=False, history=None):
     }
     if structured:
         body["response_format"] = {"type": "json_object"}
-    result = await openai("chat/completions", body)
+    result = await openai("chat/completions", body, allow_fallback=resilient)
     text = result["choices"][0]["message"]["content"]
     return parse_json(text) if structured else text
 
