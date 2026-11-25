@@ -632,3 +632,26 @@ async def test_developer_visits(pilot):
     assert await c.fetchval("select sum(views) from growth.site_visitors") == 3
     assert (await client.get("/growth/analytics")).status_code == 404
     assert "Статистика" not in (BASE / "static/growth/workspace.js").read_text()
+
+
+async def test_signup_without_email_confirmation(monkeypatch):
+    async def provider(method, path, **kwargs):
+        assert path == "signup"
+        return {
+            "access_token": "fixture-access",
+            "refresh_token": "fixture-refresh",
+            "expires_in": 3600,
+        }
+
+    monkeypatch.setattr(auth, "auth_call", provider)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=dashboard.app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/growth/auth/signup",
+            json={"email": "signup@example.test", "password": "fixture-password"},
+        )
+        assert response.json() == {"signed_in": True}
+        assert client.cookies.get("growth_access") == "fixture-access"
+        assert client.cookies.get("growth_refresh") == "fixture-refresh"
+        assert "HttpOnly" in response.headers.get_list("set-cookie")[0]

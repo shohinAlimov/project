@@ -14,7 +14,8 @@ let signup = false,
   formAction,
   speaking = "",
   simulation = "",
-  inviteLink = "";
+  inviteLink = "",
+  guideStep = 0;
 const t = (uz, ru) => (lang === "ru" ? ru : uz);
 const esc = (v) =>
   String(v ?? "").replace(
@@ -424,7 +425,9 @@ function onboarding() {
     "</main>";
 }
 async function loadState() {
-  state = await api("state");
+  const next = await api("state");
+  if (state?.id !== next.id || state?.role !== next.role) guideStep = 0;
+  state = next;
   member = state.id;
   sessionStorage.setItem("business", member);
   lang = localStorage.getItem("language") || state.language;
@@ -933,6 +936,86 @@ function assistant() {
       "</p>",
   );
 }
+function guideSteps() {
+  const steps = [
+    [
+      "overview",
+      t(
+        "Bu yerda biznesingizning umumiy holatini ko‘rasiz. Bo‘limlarni chapdagi menyudan oching.",
+        "Здесь видна общая картина бизнеса. Переключайте разделы в меню слева.",
+      ),
+    ],
+    [
+      "production",
+      t(
+        "Birinchi mahsulotni qo‘shing: nomi, narxi va tavsifi. Mijozlarga javoblar shu katalogdan olinadi.",
+        "Добавьте первый товар — название, цену и описание. Ответы клиентам используют этот каталог.",
+      ),
+    ],
+    [
+      "finances",
+      t(
+        "Buyurtmalar, daromad va xarajatlarni shu yerda kiriting. Chekni saqlashdan oldin ma’lumotlarini tekshiring.",
+        "Здесь добавляют заказы, доходы и расходы. Перед сохранением чека проверьте его данные.",
+      ),
+    ],
+    [
+      "marketing",
+      t(
+        "Mahsulot uchun post yarating va mijozlar qaysi mavzularni so‘rayotganini ko‘ring.",
+        "Создавайте публикации для товаров и смотрите, какие темы интересуют клиентов.",
+      ),
+    ],
+    [
+      "assistant",
+      t(
+        "Katalog, to‘lovlar yoki xarajatlar haqida savol bering. Aniq javoblar uchun avval biznes ma’lumotlarini kiriting.",
+        "Задавайте вопросы о каталоге, оплатах и расходах. Сначала внесите данные бизнеса, чтобы помощнику было на что опираться.",
+      ),
+    ],
+    [
+      "settings",
+      t(
+        "Profil, yetkazib berish va to‘lov shartlarini to‘ldiring. Bu yerda javoblarni ham sozlaysiz.",
+        "Заполните профиль, условия доставки и оплаты. Здесь же настраиваются готовые ответы клиентам.",
+      ),
+    ],
+  ];
+  return steps.filter(([key]) => allowed().includes(key));
+}
+function guideKey() {
+  return "growth-guide-v1:" + state.id + ":" + state.role;
+}
+function guide() {
+  if (localStorage.getItem(guideKey()) === "done") return "";
+  const steps = guideSteps();
+  const [target, text] = steps[guideStep] || steps[0];
+  return (
+    '<section class="panel guide" aria-label="' +
+    t("Boshlash uchun yordam", "Подсказки для начала работы") +
+    '"><div class="head"><h2>' +
+    esc(t("Qisqa tanishuv", "Короткое знакомство")) +
+    " · " +
+    (guideStep + 1) +
+    "/" +
+    steps.length +
+    "</h2>" +
+    btn("guideDone", t("Yopish", "Закрыть"), "textbtn") +
+    "</div><p>" +
+    esc(text) +
+    '</p><div class="actions">' +
+    (page !== target
+      ? btn("guideOpen", pages()[target][1], "soft", target)
+      : "") +
+    btn(
+      "guideNext",
+      guideStep === steps.length - 1
+        ? t("Tayyor", "Готово")
+        : t("Keyingi", "Далее"),
+    ) +
+    "</div></section>"
+  );
+}
 function render() {
   document.documentElement.lang = lang;
   const p = pages();
@@ -990,6 +1073,7 @@ function render() {
         )
       : "") +
     langs() +
+    btn("guideRestart", t("Yordam", "Подсказки"), "plain") +
     btn("logout", t("Chiqish", "Выйти"), "plain") +
     '</div></div><div class="head"><h1 class="title">' +
     p[page][1] +
@@ -1000,6 +1084,7 @@ function render() {
       timeZone: "Asia/Tashkent",
     }) +
     "</span></div>" +
+    guide() +
     body +
     "</main></div>";
 }
@@ -1165,6 +1250,32 @@ function askResult(res) {
   return lines.join("\n");
 }
 const actions = {
+  guideDone: () => {
+    localStorage.setItem(guideKey(), "done");
+    render();
+  },
+  guideRestart: () => {
+    localStorage.removeItem(guideKey());
+    guideStep = 0;
+    page = "overview";
+    render();
+  },
+  guideOpen: (target) => {
+    page = target;
+    render();
+  },
+  guideNext: () => {
+    const steps = guideSteps();
+    if (guideStep === steps.length - 1)
+      localStorage.setItem(guideKey(), "done");
+    else {
+      guideStep++;
+      page = steps[guideStep][0];
+    }
+    menuOpen = false;
+    render();
+    window.scrollTo(0, 0);
+  },
   lang: async (id) => {
     lang = id;
     localStorage.setItem("language", id);

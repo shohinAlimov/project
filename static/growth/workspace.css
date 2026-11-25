@@ -629,3 +629,16 @@ button:hover {
     font-size: 0.9rem;
   }
 }
+
+.guide {
+  background: #edf3e7;
+  border-color: #bbcfad;
+}
+.guide p {
+  line-height: 1.6;
+  margin-bottom: 1rem;
+  max-width: 70ch;
+}
+.top > .row {
+  flex-wrap: wrap;
+}
