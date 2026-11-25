@@ -272,7 +272,7 @@ function authPage() {
         : t("Hisob ochish", "Создать аккаунт"),
       "textbtn",
     ) +
-    (!signup && config.auth
+    (!signup && config.auth && confirmation
       ? btn(
           "resendConfirmation",
           t("Tasdiqlash xatini qayta yuborish", "Отправить письмо ещё раз"),
