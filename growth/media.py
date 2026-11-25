@@ -5,7 +5,7 @@ import hashlib
 import io
 import json
 import logging
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 import os
 import textwrap
 from datetime import date
@@ -129,6 +129,48 @@ def ai_text():
     return bool(text_key())
 
 
+async def gemini_request(client, key, body):
+    contents, system = [], []
+    for message in body["messages"]:
+        content = message["content"]
+        parts = []
+        if isinstance(content, str):
+            parts.append({"text": content})
+        else:
+            for part in content:
+                if part["type"] == "text":
+                    parts.append({"text": part["text"]})
+                elif part["type"] == "image_url":
+                    header, encoded = part["image_url"]["url"].split(",", 1)
+                    if not header.startswith("data:image/") or not header.endswith(
+                        ";base64"
+                    ):
+                        raise HTTPException(422, "Inline image required")
+                    parts.append(
+                        {"inlineData": {"mimeType": header[5:-7], "data": encoded}}
+                    )
+        if message["role"] == "system":
+            system.extend(parts)
+        else:
+            contents.append(
+                {
+                    "role": "model" if message["role"] == "assistant" else "user",
+                    "parts": parts,
+                }
+            )
+    payload = {"contents": contents, "systemInstruction": {"parts": system}}
+    if body.get("response_format", {}).get("type") == "json_object":
+        payload["generationConfig"] = {"responseMimeType": "application/json"}
+    model = quote(str(body["model"]).removeprefix("models/"), safe="")
+    return await client.post(
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        + model
+        + ":generateContent",
+        headers={"x-goog-api-key": key},
+        json=payload,
+    )
+
+
 async def openai(path, body):
     # Image generation always uses OpenAI. Text and vision go to the configured provider,
     # so a Gemini key can never be sent to OpenAI's image endpoint or the reverse.
@@ -145,12 +187,28 @@ async def openai(path, body):
     limit = 100 if path.startswith("images/") else 30
     async with httpx.AsyncClient(timeout=limit) as client:
         try:
-            r = await client.post(
-                base.rstrip("/") + "/" + path,
-                headers={"Authorization": "Bearer " + key},
-                json=body,
+            native = (
+                path == "chat/completions"
+                and urlsplit(base).hostname == "generativelanguage.googleapis.com"
             )
+            if native:
+                r = await gemini_request(client, key, body)
+            else:
+                r = await client.post(
+                    base.rstrip("/") + "/" + path,
+                    headers={"Authorization": "Bearer " + key},
+                    json=body,
+                )
             if r.is_success:
+                if native:
+                    try:
+                        text = "".join(
+                            part.get("text", "")
+                            for part in r.json()["candidates"][0]["content"]["parts"]
+                        )
+                    except (KeyError, IndexError, TypeError):
+                        raise HTTPException(503, "AI returned no text")
+                    return {"choices": [{"message": {"content": text}}]}
                 return r.json()
             model = str(body.get("model", ""))
             safe_model = (
@@ -172,32 +230,6 @@ async def openai(path, body):
                 raise HTTPException(
                     503, "AI provider credentials or model access need attention"
                 )
-            if (
-                r.status_code == 404
-                and urlsplit(base).hostname == "generativelanguage.googleapis.com"
-            ):
-                models = await client.get(
-                    "https://generativelanguage.googleapis.com/v1beta/models",
-                    headers={"x-goog-api-key": key},
-                )
-                if models.is_success:
-                    names = [
-                        m.get("name", "").removeprefix("models/")
-                        for m in models.json().get("models", [])
-                        if "generateContent" in m.get("supportedGenerationMethods", [])
-                    ]
-                    logging.warning(
-                        "Gemini available text models: %s",
-                        ",".join(
-                            name
-                            for name in names
-                            if name.startswith("gemini-") and "flash" in name
-                        )[:800],
-                    )
-                else:
-                    logging.warning(
-                        "Gemini model discovery HTTP %s", models.status_code
-                    )
             if r.status_code == 404:
                 raise HTTPException(
                     503, "Configured AI model or endpoint was not found"
