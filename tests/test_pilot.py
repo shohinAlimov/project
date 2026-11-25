@@ -591,3 +591,22 @@ async def test_text_provider_is_configurable_and_images_stay_on_openai(monkeypat
     with pytest.raises(media.HTTPException):
         await media.completion("Read it.", "x")
     assert not seen
+
+
+async def test_slow_ai_provider_leaves_a_manual_draft(monkeypatch):
+    used = {}
+
+    def handler(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    real = httpx.AsyncClient
+
+    def factory(**kw):
+        used["timeout"] = kw["timeout"]
+        return real(transport=httpx.MockTransport(handler), **kw)
+
+    monkeypatch.setattr(media.httpx, "AsyncClient", factory)
+    monkeypatch.setenv("LLM_API_KEY", "gemini-fixture")
+    monkeypatch.setenv("LLM_BASE_URL", "https://gemini.example.test/v1beta/openai/")
+    assert await media.receipt_fields(png(), "expense") == {}
+    assert used["timeout"] == 30

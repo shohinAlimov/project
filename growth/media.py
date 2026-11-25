@@ -138,7 +138,10 @@ async def openai(path, body):
         raise HTTPException(503, "AI API key required")
     if not base.startswith("https://"):
         raise HTTPException(503, "AI provider URL must use HTTPS")
-    async with httpx.AsyncClient(timeout=100) as client:
+    # Reading a receipt must never hold an upload hostage: after 30 s the receipt is saved
+    # as a manual draft. Only image generation is allowed to take longer.
+    limit = 100 if path.startswith("images/") else 30
+    async with httpx.AsyncClient(timeout=limit) as client:
         try:
             r = await client.post(
                 base.rstrip("/") + "/" + path,
