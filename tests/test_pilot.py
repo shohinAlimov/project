@@ -610,3 +610,29 @@ async def test_slow_ai_provider_leaves_a_manual_draft(monkeypatch):
     monkeypatch.setenv("LLM_BASE_URL", "https://gemini.example.test/v1beta/openai/")
     assert await media.receipt_fields(png(), "expense") == {}
     assert used["timeout"] == 30
+
+
+async def test_workspace_statistics(pilot):
+    client, biz, c = pilot
+    await client.post("/growth/analytics/view")
+    await call(client, "products", {"name": "Cake", "price": 1000})
+    assert (await client.post("/growth/products", json={})).status_code == 422
+    report = (await client.get("/growth/analytics")).json()
+    assert report["totals"] == {"page_view": 1, "product_saved": 1}
+    assert len(report["daily"]) == 30
+    assert (await client.get("/growth/analytics?days=20000")).status_code == 422
+    member = await c.fetchrow(
+        "select subject from growth.members where business_id=$1", biz
+    )
+    await c.execute(
+        "update growth.members set role='marketing' where business_id=$1", biz
+    )
+    assert (await client.get("/growth/analytics")).status_code == 403
+    assert (await client.post("/growth/analytics/view")).status_code == 200
+    await c.execute(
+        "update growth.members set role='owner' where business_id=$1 and subject=$2",
+        biz,
+        member["subject"],
+    )
+    client.cookies.clear()
+    assert (await client.get("/growth/analytics")).status_code == 401

@@ -629,3 +629,21 @@ button:hover {
     font-size: 0.9rem;
   }
 }
+
+.statsTable {
+  overflow-x: auto;
+}
+.statsTable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.statsTable th,
+.statsTable td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.statsTable th {
+  font-weight: 600;
+}

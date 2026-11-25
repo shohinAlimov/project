@@ -13,3 +13,6 @@ grant update(enabled) on growth.connections to :"runtime_role";
 grant update(count) on growth.topics to :"runtime_role";
 grant update(paid_at,provider_ref) on growth.invoices to :"runtime_role";
 grant delete on growth.invites,growth.members to :"runtime_role";
+
+grant select,insert on growth.analytics_daily to :"runtime_role";
+grant update(count) on growth.analytics_daily to :"runtime_role";

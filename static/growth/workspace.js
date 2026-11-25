@@ -131,6 +131,7 @@ const topicName = (k) =>
     handoff: t("Egasiga savol", "Вопрос владельцу"),
   })[k] || k;
 const pages = () => ({
+  analytics: ["▥", t("Statistika", "Статистика")],
   overview: ["◫", t("Umumiy ko‘rinish", "Обзор")],
   finances: ["↗", t("Moliya", "Финансы")],
   marketing: ["✦", t("Marketing", "Маркетинг")],
@@ -462,6 +463,7 @@ async function boot() {
       (m) => m.business_id === (member || sessionStorage.getItem("business")),
     )?.business_id || memberships[0].business_id;
   await loadState();
+  api("analytics/view", "POST").catch(() => {});
 }
 function metrics() {
   const f = state.figures;
@@ -933,10 +935,84 @@ function assistant() {
       "</p>",
   );
 }
+let statistics = null,
+  statisticsError = "";
+function analytics() {
+  const labels = {
+    page_view: t("Ish joyini ochish", "Открытия рабочего пространства"),
+    product_saved: t("Mahsulot saqlash", "Сохранения товаров"),
+    assistant_used: t("Yordamchiga savollar", "Запросы к помощнику"),
+    order_created: t("Yangi buyurtmalar", "Созданные заказы"),
+    entry_recorded: t("Moliyaviy yozuvlar", "Записи в журнале"),
+    visual_created: t("Yangi rasmlar", "Созданные публикации"),
+  };
+  const description =
+    '<p class="blank">' +
+    t(
+      "Oxirgi 30 kun. Hisoblagichlar statistika yoqilgan kundan boshlanadi.",
+      "Последние 30 дней. Счётчики собирают данные с момента подключения статистики.",
+    ) +
+    "</p>";
+  if (statisticsError)
+    return panel(
+      t("Statistika", "Статистика"),
+      esc(statisticsError) +
+        btn("refreshStats", t("Qayta urinish", "Повторить")),
+    );
+  if (!statistics)
+    return panel(t("Statistika", "Статистика"), t("Yuklanmoqda…", "Загрузка…"));
+  return (
+    panel(
+      t("Faollik", "Активность"),
+      description +
+        Object.entries(labels)
+          .map(([key, label]) => item(label, esc(statistics.totals[key] || 0)))
+          .join("") +
+        btn("refreshStats", t("Yangilash", "Обновить"), "soft"),
+    ) +
+    panel(
+      t("Kunlar bo‘yicha", "По дням"),
+      '<div class="statsTable"><table><thead><tr><th>' +
+        t("Sana", "Дата") +
+        "</th>" +
+        Object.values(labels)
+          .map((label) => '<th scope="col">' + esc(label) + "</th>")
+          .join("") +
+        "</tr></thead><tbody>" +
+        statistics.daily
+          .slice()
+          .reverse()
+          .map(
+            (row) =>
+              '<tr><th scope="row">' +
+              esc(row.day) +
+              "</th>" +
+              Object.keys(labels)
+                .map((key) => "<td>" + esc(row.events[key] || 0) + "</td>")
+                .join("") +
+              "</tr>",
+          )
+          .join("") +
+        "</tbody></table></div>",
+    )
+  );
+}
+async function refreshStats() {
+  statistics = null;
+  statisticsError = "";
+  render();
+  try {
+    statistics = await api("analytics");
+  } catch (err) {
+    statisticsError = err.message;
+  }
+  if (state && page === "analytics") render();
+}
 function render() {
   document.documentElement.lang = lang;
   const p = pages();
   const body = {
+    analytics,
     overview,
     finances,
     marketing,
@@ -1172,11 +1248,13 @@ const actions = {
     else if (root.querySelector(".sheet")) onboarding();
     else authPage();
   },
+  refreshStats,
   nav: async (id) => {
     page = id;
     menuOpen = false;
     render();
     window.scrollTo(0, 0);
+    if (id === "analytics") await refreshStats();
   },
   menu: async () => {
     menuOpen = !menuOpen;
