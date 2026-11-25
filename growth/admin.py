@@ -9,6 +9,7 @@ import asyncpg
 from aiogram import Bot
 from dotenv import load_dotenv
 
+from db import connection_options
 from . import billing
 from .auth import context
 
@@ -17,7 +18,7 @@ async def run(a):
     load_dotenv()
     c = await asyncpg.connect(
         os.environ.get("GROWTH_ADMIN_DATABASE_URL") or os.environ["DATABASE_URL"],
-        statement_cache_size=0,
+        **connection_options(),
     )
     try:
         async with c.transaction():

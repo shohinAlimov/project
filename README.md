@@ -30,6 +30,7 @@ Deploy the `web-mvp` branch as one persistent Railway service. The Dockerfile in
 | Variable | Where and how it is used |
 | --- | --- |
 | DATABASE_URL | Railway variable. PostgreSQL connection URI with TLS for the app's restricted runtime login. Use a Supabase session pooler if the host lacks IPv6. |
+| DATABASE_CA_FILE | For the pilot's direct Supabase connection, use `growth/assets/supabase-root-2021.crt`. The server verifies the certificate and hostname using this CA. The certificate comes from [Supabase](https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt). |
 | SESSION_SECRET | Railway secret. A long random value shared across restarts. |
 | SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY | Development project's API URL and publishable key. Enable Email Auth, configure the public site URL and confirm email delivery in Supabase Auth. |
 | SUPABASE_STORAGE_KEY | Optional server-side storage secret for `growth-private`. With it configured, new files go in Supabase Storage. Without it, the same membership-checked file endpoint serves restricted PostgreSQL binary objects. Existing files keep their original backend. |

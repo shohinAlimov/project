@@ -1,5 +1,6 @@
 """PostgreSQL storage (asyncpg). Schema: schema.sql"""
 import os
+import ssl
 from datetime import date, timedelta
 
 import asyncpg
@@ -7,11 +8,20 @@ import asyncpg
 _pool = None
 
 
+def connection_options():
+    options = {"statement_cache_size": 0}
+    ca_file = os.getenv("DATABASE_CA_FILE")
+    if ca_file:
+        # An explicit trust store also works in an unprivileged container without a home directory.
+        options["ssl"] = ssl.create_default_context(cafile=ca_file)
+    return options
+
+
 async def init():
     global _pool
     # statement_cache_size=0 keeps it compatible with Supabase poolers
     _pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=5,
-                                      statement_cache_size=0)
+                                      **connection_options())
 
 
 async def close():
