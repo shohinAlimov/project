@@ -115,14 +115,33 @@ async def read_file(c, biz, file_id):
     return res.content, r["mime"]
 
 
+OPENAI_BASE = "https://api.openai.com/v1/"
+
+
+def text_key():
+    """Key for text and vision requests: any OpenAI-compatible provider (e.g. Gemini)."""
+    return os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+
+def ai_text():
+    return bool(text_key())
+
+
 async def openai(path, body):
-    key = os.getenv("OPENAI_API_KEY")
+    # Image generation always uses OpenAI. Text and vision go to the configured provider,
+    # so a Gemini key can never be sent to OpenAI's image endpoint or the reverse.
+    if path.startswith("images/"):
+        key, base = os.getenv("OPENAI_API_KEY"), OPENAI_BASE
+    else:
+        key, base = text_key(), os.getenv("LLM_BASE_URL") or OPENAI_BASE
     if not key:
-        raise HTTPException(503, "OpenAI API key required")
+        raise HTTPException(503, "AI API key required")
+    if not base.startswith("https://"):
+        raise HTTPException(503, "AI provider URL must use HTTPS")
     async with httpx.AsyncClient(timeout=100) as client:
         try:
             r = await client.post(
-                "https://api.openai.com/v1/" + path,
+                base.rstrip("/") + "/" + path,
                 headers={"Authorization": "Bearer " + key},
                 json=body,
             )
@@ -130,14 +149,26 @@ async def openai(path, body):
                 return r.json()
         except httpx.HTTPError:
             pass
-    raise HTTPException(503, "OpenAI service unavailable")
+    raise HTTPException(503, "AI service unavailable")
+
+
+def parse_json(text):
+    # Some providers wrap JSON in a markdown fence even when asked for plain JSON.
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+    return json.loads(text)
 
 
 async def completion(instruction, content, structured=False):
     body = {
-        "model": os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini"),
+        "model": os.getenv("LLM_TEXT_MODEL")
+        or os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini"),
         "messages": [
-            {"role": "system", "content": instruction},
+            {
+                "role": "system",
+                "content": instruction + (" Return only JSON." if structured else ""),
+            },
             {"role": "user", "content": content},
         ],
     }
@@ -145,12 +176,12 @@ async def completion(instruction, content, structured=False):
         body["response_format"] = {"type": "json_object"}
     result = await openai("chat/completions", body)
     text = result["choices"][0]["message"]["content"]
-    return json.loads(text) if structured else text
+    return parse_json(text) if structured else text
 
 
 async def receipt_fields(data, kind, demo=False):
     fields = {}
-    if not demo and os.getenv("OPENAI_API_KEY"):
+    if not demo and ai_text():
         try:
             mime = image_type(data)
             obj = await completion(

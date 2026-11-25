@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 import os
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -130,6 +131,7 @@ async def test_business_handoff_receipts_and_duplicate_confirmations(pilot):
         "insert into growth.connections values('test', $1,100,true)", biz
     )
     replies = []
+    alerts = []
 
     async def send(text):
         replies.append(text)
@@ -140,7 +142,15 @@ async def test_business_handoff_receipts_and_duplicate_confirmations(pilot):
 
         async with db._pool.acquire() as c, c.transaction():
             await telegram.handle(
-                c, connection, 200, mid, sender, msg, load if file else None, send
+                c,
+                connection,
+                200,
+                mid,
+                sender,
+                msg,
+                load if file else None,
+                send,
+                outbox=alerts,
             )
 
     await update(1, "Как забрать заказ?", connection="unknown")
@@ -165,6 +175,9 @@ async def test_business_handoff_receipts_and_duplicate_confirmations(pilot):
     await update(7, file=photo)
     s = await state(client)
     assert not replies and s["chats"][0]["paused"] and len(s["receipts"]) == 1
+    # One alert for the new screenshot only; the resent file and message are not alerted again.
+    assert len(alerts) == 1 and alerts[0][0] == 100
+    assert "💳" in alerts[0][1] and "Финансы" in alerts[0][1]
     assert s["topics"][0]["count"] == 2
     receipt = s["receipts"][0]
     assert receipt["id"] == await put_photo(client, "income", photo)
@@ -539,3 +552,42 @@ async def test_legacy_commands_and_business_dispatch(pilot, monkeypatch):
     finally:
         await transport.session.close()
         await pool.close()
+
+
+async def test_text_provider_is_configurable_and_images_stay_on_openai(monkeypatch):
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["authorization"]
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '```json\n{"amount": 5}\n```'}}]},
+        )
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        media.httpx,
+        "AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "gemini-fixture")
+    monkeypatch.setenv("LLM_BASE_URL", "https://gemini.example.test/v1beta/openai/")
+    monkeypatch.setenv("LLM_TEXT_MODEL", "gemini-fixture-model")
+    assert media.ai_text()
+    assert await media.completion("Read it.", "x", True) == {"amount": 5}
+    assert seen["url"] == "https://gemini.example.test/v1beta/openai/chat/completions"
+    assert seen["auth"] == "Bearer gemini-fixture"
+    assert seen["body"]["model"] == "gemini-fixture-model"
+    # The text provider's key is never used for image generation.
+    seen.clear()
+    with pytest.raises(media.HTTPException):
+        await media.openai("images/generations", {})
+    assert not seen
+    # A non-HTTPS provider URL is refused before any request is made.
+    monkeypatch.setenv("LLM_BASE_URL", "http://insecure.example.test/")
+    with pytest.raises(media.HTTPException):
+        await media.completion("Read it.", "x")
+    assert not seen

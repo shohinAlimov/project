@@ -437,7 +437,7 @@ async def assistant(req: Request, body: Question, monthly: bool = False):
                 "select name,price from growth.products where business_id=$1", biz
             )
         ]
-        if not shop["demo"] and os.getenv("OPENAI_API_KEY"):
+        if not shop["demo"] and media.ai_text():
             result = await media.completion(
                 "Answer in "
                 + shop["language"]
@@ -519,8 +519,8 @@ async def note(req: Request, body: Question, summary: bool = False):
             )
             if not notes:
                 raise HTTPException(422, "Add a team note first")
-            if shop["demo"] or not os.getenv("OPENAI_API_KEY"):
-                raise HTTPException(503, "OpenAI API key required for shared summaries")
+            if shop["demo"] or not media.ai_text():
+                raise HTTPException(503, "AI API key required for shared summaries")
             value = await media.completion(
                 "Summarize decisions, next steps and open questions in "
                 + shop["language"]

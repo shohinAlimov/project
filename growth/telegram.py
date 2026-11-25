@@ -6,12 +6,13 @@ import os
 import re
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import BusinessConnection, Message
 from fastapi import HTTPException
 
 import db
 from .auth import context
-from .media import MAX_BYTES, completion, receive
+from .media import MAX_BYTES, ai_text, completion, receive
 
 router = Router()
 PATTERNS = {
@@ -66,7 +67,7 @@ async def answer(c, biz, message, shop):
             )
         )
         and not faq
-        and os.getenv("OPENAI_API_KEY")
+        and ai_text()
         and not shop["demo"]
     ):
         try:
@@ -158,8 +159,47 @@ async def connection_changed(event: BusinessConnection):
             )
 
 
+def payment_notice(lang, fields, customer):
+    """Owner alert for a customer payment screenshot. The screenshot is never trusted as proof."""
+    amount = fields.get("amount")
+    day = fields.get("day")
+    ref = fields.get("reference")
+    if lang == "uz":
+        lines = ["💳 Mijozdan to‘lov skrinshoti keldi."]
+        lines.append(
+            f"Summa: {amount:,} UZS".replace(",", " ")
+            if amount
+            else "Summa o‘qilmadi — qo‘lda kiriting."
+        )
+        if day:
+            lines.append(f"Sana: {day}")
+        if ref:
+            lines.append(f"Operatsiya raqami: {ref}")
+        lines.append(
+            "Pul bank hisobingizga tushganini tekshiring, so‘ng saytdagi Moliya bo‘limida tasdiqlang."
+        )
+    else:
+        lines = ["💳 Клиент прислал скриншот оплаты."]
+        lines.append(
+            f"Сумма: {amount:,} UZS".replace(",", " ")
+            if amount
+            else "Сумму прочитать не удалось — введите вручную."
+        )
+        if day:
+            lines.append(f"Дата: {day}")
+        if ref:
+            lines.append(f"Номер операции: {ref}")
+        lines.append(
+            "Проверьте, что деньги пришли на счёт, и подтвердите в разделе «Финансы» на сайте."
+        )
+    url = os.getenv("PUBLIC_APP_URL", "").strip()
+    if url.startswith("https://"):
+        lines.append(url)
+    return "\n".join(lines)
+
+
 async def handle(
-    c, connection, chat, message_id, sender, text, load_image, send, from_bot=False
+    c, connection, chat, message_id, sender, text, load_image, send, from_bot=False, outbox=None
 ):
     await context(c, "connection", connection)
     mapping = await c.fetchrow(
@@ -194,7 +234,23 @@ async def handle(
     if load_image:
         data = await load_image()
         if data:
-            await receive(c, biz, data, "income", str(chat), shop["demo"])
+            before = await c.fetchval(
+                "select count(*) from growth.receipts where business_id=$1", biz
+            )
+            rid = await receive(c, biz, data, "income", str(chat), shop["demo"])
+            fresh = await c.fetchval(
+                "select count(*) from growth.receipts where business_id=$1", biz
+            )
+            if outbox is not None and fresh > before:
+                fields = json.loads(
+                    await c.fetchval("select fields from growth.receipts where id=$1", rid)
+                )
+                outbox.append(
+                    (
+                        mapping["telegram_owner"],
+                        payment_notice(shop["language"], fields, str(chat)),
+                    )
+                )
         else:
             await c.execute(
                 "update growth.chats set paused=true,summary=$2 where id=$1",
@@ -261,6 +317,7 @@ async def business_message(m: Message):
             text=text,
         )
 
+    outbox = []
     async with db._pool.acquire() as c, c.transaction():
         await handle(
             c,
@@ -272,7 +329,17 @@ async def business_message(m: Message):
             download if photo else None,
             send,
             bool(m.sender_business_bot) or m.from_user.is_bot,
+            outbox,
         )
+    # Sent only after the commit, so a retried update cannot alert twice for one rollback.
+    # The owner must have opened the bot once; a refusal never blocks customer handling.
+    for owner, text in outbox:
+        try:
+            await m.bot.send_message(chat_id=owner, text=text)
+        except (TelegramForbiddenError, TelegramBadRequest):
+            logging.getLogger("uvicorn.error").info(
+                "Owner %s has not opened the bot; payment alert skipped", owner
+            )
 
 
 async def pilot_polling():
