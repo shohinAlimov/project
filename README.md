@@ -1,5 +1,7 @@
 # AI Growth Assistant
 
+[Hosted pilot](https://growth-workspace-development.up.railway.app/) · [Статус интеграций, сценарий и подключение первого магазина](PILOT.ru.md)
+
 A mobile owner workspace for online shops and home bakeries in Uzbekistan. FastAPI serves the Uzbek/Russian interface and the original Telegram-code dashboard at `/legacy`. The website and Telegram Business handlers use the same PostgreSQL catalog, receipts, order balances and handoff state.
 
 ## Run locally
