@@ -1,95 +1,125 @@
 # AI Growth Assistant
 
-[Hosted pilot](https://growth-workspace-development.up.railway.app/) · [Статус интеграций, сценарий и подключение первого магазина](PILOT.ru.md)
+Мобильный кабинет владельца для интернет-магазинов и домашних пекарен в Узбекистане. Интерфейс на узбекском и русском. Сайт и Telegram-бот работают с одной базой PostgreSQL: каталог, заказы, чеки, финансы.
 
-A mobile owner workspace for online shops and home bakeries in Uzbekistan. FastAPI serves the Uzbek/Russian interface and the original Telegram-code dashboard at `/legacy`. The website and Telegram Business handlers use the same PostgreSQL catalog, receipts, order balances and handoff state.
+## Что умеет
 
-## Run locally
+| Раздел | Что делает |
+| --- | --- |
+| **Автоответы в Telegram** | Отвечает клиентам по каталогу, ценам и FAQ (uz/ru). Если не уверен или клиент просит «особый заказ», ставит чат на паузу и передаёт владельцу. |
+| **Чеки и платежи** | Принимает скриншоты, ИИ читает сумму, дату и номер операции и создаёт черновик. Владельцу приходит уведомление в Telegram. **Платёж клиента всегда подтверждается вручную** после проверки счёта. |
+| **Финансы** | Заказы, авансы, остатки, доходы и расходы. Один и тот же чек не записывается дважды. |
+| **Маркетинг** | Частые вопросы клиентов и постеры: брендированный шаблон (без ИИ) или ИИ-фото. |
+| **Команда** | Приглашения для сотрудников с ролями «финансы» и «маркетинг», доступ можно отозвать. |
+| **Тариф** | Free: 5 постов в месяц. Starter: 48 000 UZS за 30 дней, 30 постов. Активация пока вручную (Payme позже). |
 
-Use Python 3.12 and PostgreSQL 15+. Create an empty development database first.
+Старый бот и его панель (`/legacy`) работают рядом с новым кабинетом.
+
+## Стек
+
+Python 3.12 · FastAPI · aiogram (Telegram Business) · PostgreSQL/Supabase (RLS) · Railway · ИИ через OpenAI-совместимый API (Gemini, OpenAI).
+
+## Быстрый старт
+
+Нужны Python 3.12 и PostgreSQL 15+ (пустая тестовая база).
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
-# Set DATABASE_URL to the development database in .env.
-set -a
-. ./.env
-set +a
-for file in supabase/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f "$file"; done
+cp .env.example .env               # впишите DATABASE_URL
+set -a; . ./.env; set +a
+for f in supabase/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -1 -f "$f"; done
 GROWTH_DEMO=1 RUN_BOT=0 python dashboard.py
 ```
 
-Open http://localhost:8000 and choose **Demo do‘konni ochish / Открыть демомагазин**. Each demo session starts with its own workspace. Email/password sign-up and login use Supabase Auth. Email confirmation follows the development project's Auth settings. The demo has a separate signed browser session, a template-based poster, a simulated Telegram conversation and test billing. Demo sessions last 24 hours.
+Откройте http://localhost:8000 и нажмите «Открыть демомагазин». Демо работает без почты и ключей ИИ.
 
-For a Supabase project, apply each migration **once**, in filename order, with Supabase migrations or SQL Editor. The first creates the private `growth` schema, its row-level policies and the private `growth-private` bucket. The compatibility migration creates a compatibility schema for new installations of the original bot. Existing installations continue to resolve legacy tables with their existing search path. For a fresh legacy installation, set the legacy DB user's search path to `growth_legacy,public` and grant it access to that schema. The new workspace has its own journal. Importing historical legacy transactions is outside this pilot.
+Миграции применяются **один раз**, строго по порядку имён файлов.
 
-## Deployment
+## Переменные окружения
 
-Deploy the `web-mvp` branch as one persistent Railway service. The Dockerfile installs the pinned dependencies, includes a Cyrillic-capable font and starts `python dashboard.py`. Use one replica, health check `/health`, HTTPS and disabled sleeping. Set `COOKIE_SECURE=1`. Keep the existing Render deployment on its current branch and token. The original Render free plan can sleep.
+Секреты хранятся только в переменных Railway или в локальном `.env`. Файл `.env` нельзя коммитить.
 
-| Variable | Where and how it is used |
+| Переменная | Назначение |
 | --- | --- |
-| DATABASE_URL | Railway variable. PostgreSQL connection URI with TLS for the app's restricted runtime login. Use a Supabase session pooler if the host lacks IPv6. |
-| DATABASE_CA_FILE | For the pilot's direct Supabase connection, use `growth/assets/supabase-root-2021.crt`. The server verifies the certificate and hostname using this CA. The certificate comes from [Supabase](https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt). |
-| SESSION_SECRET | Railway secret. A long random value shared across restarts. |
-| PUBLIC_APP_URL | Public HTTPS origin used by signup and resend. In Supabase Authentication → URL Configuration, set Site URL to this origin and add its exact root URL (with trailing slash) to Redirect URLs. |
-| SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY | Development project's API URL and publishable key. Enable Email Auth, configure the public site URL and confirm email delivery in Supabase Auth. |
-| SUPABASE_STORAGE_KEY | Optional server-side storage secret for `growth-private`. With it configured, new files go in Supabase Storage. Without it, the same membership-checked file endpoint serves restricted PostgreSQL binary objects. Existing files keep their original backend. |
-| LLM_BASE_URL, LLM_API_KEY, LLM_TEXT_MODEL | Optional. Provider for receipt extraction, intent classification, analysis and summaries. Any OpenAI-compatible endpoint works, e.g. Gemini with `https://generativelanguage.googleapis.com/v1beta/openai/`. When empty, `OPENAI_API_KEY` and OpenAI are used. A free Gemini tier may use requests to improve Google products, so test it with synthetic data only. |
-| OPENAI_API_KEY | Server-side Railway secret. Required only for AI photographs in posters (`gpt-image-1`); the branded template needs no key. It also serves text when `LLM_API_KEY` is empty. A local env file alone cannot power Railway. |
-| OPENAI_TEXT_MODEL, OPENAI_IMAGE_MODEL | Defaults `gpt-4o-mini` and `gpt-image-1`. The project needs model access and API billing. |
-| BOT_TOKEN, RUN_BOT, BUSINESS_ONLY | Use a separate Business Mode test bot. Set `BUSINESS_ONLY=1` on the pilot service and enable `RUN_BOT=1` only once the token is ready. Keep `RUN_BOT=0` for a web-only pilot. |
-| DASHBOARD_URL | Public address for the original bot's dashboard link, e.g. the original host plus `/legacy`. |
-| GROWTH_DEMO | Set to `1` to allow isolated demo sessions. Set to `0` to require Supabase Auth. |
-| STARTER_PRICE_UZS, STARTER_VISUAL_LIMIT | Defaults 48000 UZS per 30 days and 30 successful posts per calendar month. Free gets five in the Asia/Tashkent calendar month. |
-| GROWTH_ADMIN_DATABASE_URL | Operator machine or restricted operator job only. Used to map a verified Telegram account or record a merchant-verified pilot activation. |
+| `DATABASE_URL` | Подключение к PostgreSQL (с TLS) от ограниченного пользователя приложения |
+| `DATABASE_CA_FILE` | Для прямого подключения к Supabase: `growth/assets/supabase-root-2021.crt` |
+| `SESSION_SECRET` | Длинная случайная строка, одна и та же между перезапусками |
+| `COOKIE_SECURE` | `1` на боевом сервере (HTTPS) |
+| `PUBLIC_APP_URL` | Публичный HTTPS-адрес сайта |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | Вход по почте (Supabase Auth) |
+| `SUPABASE_STORAGE_KEY` | По желанию: хранить файлы в Supabase Storage вместо PostgreSQL |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_TEXT_MODEL` | ИИ для чеков, классификации сообщений и сводок. Пример для Gemini: `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| `OPENAI_API_KEY` | Нужен только для ИИ-фото в постерах (`OPENAI_IMAGE_MODEL`, по умолчанию `gpt-image-1`). Без него постеры делаются по шаблону. Если `LLM_API_KEY` пуст, используется и для текста. |
+| `BOT_TOKEN`, `RUN_BOT`, `BUSINESS_ONLY` | Telegram-бот. На пилоте: `RUN_BOT=1`, `BUSINESS_ONLY=1` |
+| `DASHBOARD_URL` | Адрес старой панели (`…/legacy`) для ссылки из бота |
+| `GROWTH_DEMO` | `1` разрешает демо-сессии, `0` требует вход |
+| `STARTER_PRICE_UZS`, `STARTER_VISUAL_LIMIT` | Цена и лимит постов тарифа Starter |
+| `GROWTH_ADMIN_DATABASE_URL` | Только для оператора: команды `growth.admin` |
 
-After migrations, apply the exact grants with the psql command in `ops/runtime_grants.sql`. Use a non-owner, non-superuser runtime login with `NOBYPASSRLS`. Do not expose the `growth` schema through the public Data API. The authenticated web server selects memberships, enforces roles, and sets the PostgreSQL scope inside each request transaction. The pilot runtime requires schema usage, table reads, inserts into workspace tables, updates to shop/profile/expiry, catalog, FAQ, chat, topic, connection and invoice records, and deletes on invites and members. Keep legacy-schema privileges separate.
+> Бесплатный тариф Gemini может использовать запросы для улучшения продуктов Google. Тестируйте на выдуманных данных, а с реальными клиентами используйте платный тариф.
 
-## First shop checklist
+## Деплой (Railway)
 
-1. Confirm the owner's language and business type. Sign in, enter the business name and save delivery and payment rules.
-2. Add a product with price, design choices, availability and lead time. Save an approved answer in each customer language. A price FAQ can use `{price}` when the customer's question names a product.
-3. Add a brand color or select a draft visual direction. Upload a private brand image if available.
-4. Create an order and enter the customer's Telegram chat ID as its customer identifier to enable matching. Confirm outstanding balances on the website.
-5. In BotFather enable Business Mode for the **test token**. Connect it from the test shop's Telegram Business settings and grant reply rights for test chats. On the pilot service the connection event logs a pending ID and Telegram owner ID. Verify both with the shop owner. Settings shows the workspace ID. Run the operator command below. A received connection event alone never enrolls a shop.
-6. Use a second Telegram account to test price, delivery, a custom request, owner takeover, and a redacted payment screenshot. Confirm a receipt only after checking the actual bank account. Stop every local poller and repeat the customer question against the hosted service.
-7. For assisted demos, record attendance separately. For a paying pilot, issue a Starter invoice and verify the merchant transfer before activation. Test confirmations and demo traffic are excluded from sales.
+1. Подключите репозиторий (ветка `main`), Railway соберёт образ из `Dockerfile`.
+2. Одна реплика, health check `/health`, спящий режим выключен, `COOKIE_SECURE=1`.
+3. Добавьте переменные из таблицы выше.
+4. Выдайте права рабочему пользователю базы (пользователь без прав владельца и без `BYPASSRLS`):
+
+```bash
+psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -v runtime_role=growth_web -f ops/runtime_grants.sql
+```
+
+Схему `growth` не открывайте через публичный Data API.
+
+## Подключение Telegram-бота
+
+1. В BotFather создайте бота и включите **Business Mode**. Владельцу магазина нужен Telegram Premium.
+2. В Telegram: Настройки → Telegram для бизнеса → Чат-боты → добавьте бота, разрешите отвечать.
+3. В логах сервиса появится строка `Pending Business connection …` с ID подключения и ID владельца.
+4. Привяжите подключение (ID магазина виден в настройках сайта):
 
 ```bash
 python -m growth.admin connect BUSINESS_UUID CONNECTION_ID OWNER_TELEGRAM_ID
-# After matching the invoice, exact UZS amount and unique payment in the merchant account:
-python -m growth.admin activate BUSINESS_UUID INVOICE_UUID 48000 VERIFIED_PROVIDER_REFERENCE
 ```
 
-Settings shows the saved profile, catalog FAQs, connection status and team controls. Invite a finance or marketing worker by email, then share the generated single-use link privately. The worker signs in with that verified address and opens the link. Both roles can see shared notes and a requested AI summary. The owner can revoke access. Team pricing is proposed and Team sales are closed. Subscription invoices, test settlements and merchant references are separate from shop income. Payme hosted checkout is pending merchant onboarding.
+5. Владелец один раз нажимает **/start** у бота, иначе уведомления об оплатах не придут.
+6. Проверка со второго аккаунта: вопрос о цене, запрос «особый заказ» (чат встанет на паузу), скриншот оплаты (появится черновик).
 
-## Two-minute demo
+Подключение само по себе магазин не включает: его всегда привязывает оператор после сверки ID.
 
-| Time | Action and observable result |
-| --- | --- |
-| 0:00–0:25 | Open the demo shop. Save the profile. In Production add Medovik at 120,000 UZS. In Settings approve a pickup answer. |
-| 0:25–0:50 | In Inbox's labeled Telegram simulator ask the exact pickup question, then “Medovik narxi qancha?”. Edit the price and ask again. Ask for a custom design and observe the paused conversation. For the connected pilot, create a signed-in shop named DEMO, then use the customer's real Telegram account. |
-| 0:50–1:25 | Create a 140,000 UZS order. Upload a redacted customer screenshot in Finances, or send it in the paused Telegram chat. Open the private image, enter 40,000 UZS and the date, link the order as a deposit, verify funds, and save. The balance becomes 100,000 UZS. Resend the same image and refresh. |
-| 1:25–1:45 | Open Marketing to see counted questions. Generate a product post and download its branded PNG. Every shop can choose the branded template. Configured production shops can also select an AI photograph. |
-| 1:45–2:00 | Create a Starter test invoice in Billing and simulate payment. Early renewal adds 30 days from expiry. Shop income stays unchanged. |
+## Оплата подписки
 
-## Verification
+Пока вручную. После проверки поступления на счёт и совпадения суммы:
 
 ```bash
-python -m compileall -q bot.py dashboard.py growth
-node --check static/growth/workspace.js
+python -m growth.admin activate BUSINESS_UUID INVOICE_UUID 48000 PROVIDER_REFERENCE
+```
+
+Тестовые счета и подтверждения не попадают в выручку магазина.
+
+## Тесты
+
+```bash
 pip install pytest pytest-asyncio
-# Disposable local Postgres only. The test login creates/drops temporary databases and roles.
 TEST_POSTGRES_URL=postgresql://USER@localhost:5432/postgres python -m pytest -q tests
 ```
 
-To verify the deployable image, run `docker build -t ai-growth-assistant:pilot .`. A build environment with a private CA can supply its CA bundle as the optional BuildKit secret `build_ca`.
+Нужна только одноразовая локальная PostgreSQL: тесты сами создают и удаляют временные базы и роли.
 
-The integration suite uses real PostgreSQL transactions and RLS, isolated demo identities, synthetic receipt images, two simulated Telegram account IDs and test invoices. It exercises fresh catalog prices, approved answers, paused receipts, duplicate confirmations, manual finance, tenant and worker isolation, expiry, concurrent generation limits, private image access and OCR provider fixtures. A real Supabase email exchange, a two-account Telegram session, model inference and a merchant settlement require their respective integrations.
+## Структура
 
-Photo on sign-in: bakery photograph distributed through [Unsplash](https://images.unsplash.com/photo-1509440159596-0249088772ff).
+```
+dashboard.py        запуск сайта (FastAPI)
+growth/             новый кабинет: api, telegram, media (ИИ, постеры), finance, billing, auth, admin
+static/growth/      интерфейс кабинета
+supabase/migrations схема базы и политики доступа
+ops/                права для рабочего пользователя базы
+bot.py, db.py, …    старый бот и его панель (/legacy)
+tests/              интеграционные тесты
+```
 
-The pilot can also run from an official Python container with an immutable public commit archive. Set the Railway service start command to the command printed by `python ops/railway_release.py COMMIT_SHA`. This deployment route installs dependencies on each restart and requires outbound access to GitHub and PyPI. To roll forward or back, select the corresponding verified commit.
+## В планах
+
+Умные ответы клиентам по каталогу и FAQ · ИИ-аналитик (маркетинг, производство, финансы) · больше шаблонов постеров · автоматическая оплата через Payme/Click.
