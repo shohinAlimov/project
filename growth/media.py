@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import logging
+from urllib.parse import urlsplit
 import os
 import textwrap
 from datetime import date
@@ -151,7 +152,20 @@ async def openai(path, body):
             )
             if r.is_success:
                 return r.json()
-            logging.warning("AI provider HTTP %s for %s", r.status_code, path)
+            model = str(body.get("model", ""))
+            safe_model = (
+                model
+                if model.startswith(("gemini-", "gpt-", "o3", "o4", "claude-"))
+                and len(model) < 80
+                else "custom-model"
+            )
+            logging.warning(
+                "AI provider HTTP %s host=%s model=%s endpoint_has_completion_path=%s",
+                r.status_code,
+                urlsplit(base).hostname,
+                safe_model,
+                "chat/completions" in base,
+            )
             if r.status_code == 429:
                 raise HTTPException(503, "AI provider quota or rate limit reached")
             if r.status_code in (401, 403):
