@@ -279,7 +279,10 @@ async def completion(
     }
     if structured:
         body["response_format"] = {"type": "json_object"}
-    result = await openai("chat/completions", body, allow_fallback=resilient)
+    if resilient:
+        result = await openai("chat/completions", body, allow_fallback=True)
+    else:
+        result = await openai("chat/completions", body)
     text = result["choices"][0]["message"]["content"]
     return parse_json(text) if structured else text
 
