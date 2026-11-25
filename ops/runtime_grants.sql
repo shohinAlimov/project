@@ -14,5 +14,5 @@ grant update(count) on growth.topics to :"runtime_role";
 grant update(paid_at,provider_ref) on growth.invoices to :"runtime_role";
 grant delete on growth.invites,growth.members to :"runtime_role";
 
-grant select,insert on growth.analytics_daily to :"runtime_role";
-grant update(count) on growth.analytics_daily to :"runtime_role";
+grant execute on function growth.record_site_visit(date,text) to :"runtime_role";
+revoke all on growth.site_visitors,growth.developer_statistics,growth.analytics_daily from :"runtime_role";

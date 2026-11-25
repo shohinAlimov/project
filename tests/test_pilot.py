@@ -37,6 +37,9 @@ async def pilot(monkeypatch):
     await admin.execute(f"create role {role} nologin")
     c = await asyncpg.connect(dsn, database=database)
     try:
+        await c.execute(
+            "create schema auth; create table auth.users(id uuid primary key, created_at timestamptz default now(), email_confirmed_at timestamptz)"
+        )
         for path in sorted((BASE / "supabase/migrations").glob("*.sql")):
             await c.execute(path.read_text())
         grants = (
@@ -612,27 +615,20 @@ async def test_slow_ai_provider_leaves_a_manual_draft(monkeypatch):
     assert used["timeout"] == 30
 
 
-async def test_workspace_statistics(pilot):
+async def test_developer_visits(pilot):
     client, biz, c = pilot
-    await client.post("/growth/analytics/view")
-    await call(client, "products", {"name": "Cake", "price": 1000})
-    assert (await client.post("/growth/products", json={})).status_code == 422
-    report = (await client.get("/growth/analytics")).json()
-    assert report["totals"] == {"page_view": 1, "product_saved": 1}
-    assert len(report["daily"]) == 30
-    assert (await client.get("/growth/analytics?days=20000")).status_code == 422
-    member = await c.fetchrow(
-        "select subject from growth.members where business_id=$1", biz
-    )
-    await c.execute(
-        "update growth.members set role='marketing' where business_id=$1", biz
-    )
-    assert (await client.get("/growth/analytics")).status_code == 403
-    assert (await client.post("/growth/analytics/view")).status_code == 200
-    await c.execute(
-        "update growth.members set role='owner' where business_id=$1 and subject=$2",
-        biz,
-        member["subject"],
-    )
     client.cookies.clear()
-    assert (await client.get("/growth/analytics")).status_code == 401
+    assert (await client.get("/")).status_code == 200
+    assert (await client.get("/")).status_code == 200
+    row = await c.fetchrow(
+        "select count(*) browsers,sum(views) views from growth.site_visitors"
+    )
+    assert row["browsers"] == 1 and row["views"] == 2
+    client.cookies.clear()
+    await client.get("/")
+    row = await c.fetchrow("select * from growth.developer_statistics")
+    assert row["daily_browsers"] == 2 and row["page_views"] == 3
+    await client.get("/", headers={"user-agent": "KnownCrawlerBot"})
+    assert await c.fetchval("select sum(views) from growth.site_visitors") == 3
+    assert (await client.get("/growth/analytics")).status_code == 404
+    assert "Статистика" not in (BASE / "static/growth/workspace.js").read_text()
