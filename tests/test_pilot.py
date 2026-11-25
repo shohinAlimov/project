@@ -655,3 +655,57 @@ async def test_signup_without_email_confirmation(monkeypatch):
         assert client.cookies.get("growth_access") == "fixture-access"
         assert client.cookies.get("growth_refresh") == "fixture-refresh"
         assert "HttpOnly" in response.headers.get_list("set-cookie")[0]
+
+
+async def test_assistant_history_context_and_roles(pilot, monkeypatch):
+    client, biz, c = pilot
+    await c.execute("update growth.shops set demo=false where id=$1", biz)
+    await call(client, "products", {"name": "Медовик", "price": 90000})
+    monkeypatch.setenv("LLM_API_KEY", "fixture-key")
+    seen = []
+
+    async def completion(instruction, content, structured=False, history=None):
+        seen.append({"records": json.loads(content)["records"], "history": history})
+        return "Медовик — 90 000 UZS. Начни с проверки открытых оплат."
+
+    monkeypatch.setattr(media, "completion", completion)
+    request = {
+        "question": "С чего начать?",
+        "request_id": str(uuid4()),
+        "language": "ru",
+    }
+    # Demo auth remains the test identity, while the workspace itself uses the real provider path.
+    first = await call(client, "assistant", request)
+    assert first["source"] == "ai"
+    assert (await call(client, "assistant", request)) == first
+    assert len(seen) == 1
+    await call(client, "assistant", {"question": "А подробнее?"})
+    assert seen[1]["history"][0]["content"] == request["question"]
+    assert seen[1]["history"][1]["role"] == "assistant"
+    turns = (await client.get("/growth/assistant/history")).json()["turns"]
+    assert len(turns) == 2
+    assert turns[0]["answer"] == first["text"]
+    await c.execute(
+        "update growth.members set role='marketing' where business_id=$1", biz
+    )
+    assert (await client.get("/growth/assistant/history")).json()["turns"] == []
+    await call(client, "assistant", {"question": "Что продвигать?"})
+    assert "finances" not in seen[-1]["records"]
+    assert "orders" not in seen[-1]["records"]
+    assert seen[-1]["history"] == []
+
+    async def failed_provider(*args, **kwargs):
+        from fastapi import HTTPException
+
+        raise HTTPException(503, "Provider unavailable")
+
+    monkeypatch.setattr(media, "completion", failed_provider)
+    before = len((await client.get("/growth/assistant/history")).json()["turns"])
+    assert (
+        await client.post("/growth/assistant", json={"question": "Failure check"})
+    ).status_code == 503
+    assert (
+        len((await client.get("/growth/assistant/history")).json()["turns"]) == before
+    )
+    client.cookies.clear()
+    assert (await client.get("/growth/assistant/history")).status_code == 401

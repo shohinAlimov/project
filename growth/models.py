@@ -1,6 +1,6 @@
 from datetime import date
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from urllib.parse import urlsplit
 
@@ -96,6 +96,14 @@ class Entry(Model):
 
 class Question(Model):
     question: Name
+
+
+class AssistantPrompt(Model):
+    question: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
+    ]
+    request_id: UUID = Field(default_factory=uuid4)
+    language: Lang | None = None
 
 
 class Pause(Model):

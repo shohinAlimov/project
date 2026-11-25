@@ -163,7 +163,7 @@ def parse_json(text):
     return json.loads(text)
 
 
-async def completion(instruction, content, structured=False):
+async def completion(instruction, content, structured=False, history=None):
     body = {
         "model": os.getenv("LLM_TEXT_MODEL")
         or os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini"),
@@ -172,6 +172,7 @@ async def completion(instruction, content, structured=False):
                 "role": "system",
                 "content": instruction + (" Return only JSON." if structured else ""),
             },
+            *(history or []),
             {"role": "user", "content": content},
         ],
     }

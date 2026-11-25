@@ -642,3 +642,42 @@ button:hover {
 .top > .row {
   flex-wrap: wrap;
 }
+
+.assistantPanel {
+  border-color: #afc5a2;
+  min-width: 0;
+}
+.chatLog {
+  max-height: 390px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.5rem 0;
+}
+.chatMessage {
+  background: #f0f3eb;
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  margin: 0.7rem 0;
+  max-width: 92%;
+  overflow-wrap: anywhere;
+}
+.chatMessage p {
+  white-space: pre-wrap;
+  line-height: 1.65;
+  margin-top: 0.35rem;
+}
+.chatMessage small {
+  color: var(--muted);
+}
+.chatUser {
+  background: #e1edd7;
+  margin-left: auto;
+}
+.assistantPanel textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+.main,
+.panel {
+  min-width: 0;
+}

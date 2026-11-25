@@ -12,7 +12,11 @@ let lang = localStorage.getItem("language") || "uz",
 let signup = false,
   noticeTimer,
   formAction,
-  speaking = "",
+  chatTurns = [],
+  chatDraft = "",
+  chatError = "",
+  chatPending = null,
+  chatRetry = null,
   simulation = "",
   inviteLink = "",
   guideStep = 0;
@@ -426,12 +430,24 @@ function onboarding() {
 }
 async function loadState() {
   const next = await api("state");
-  if (state?.id !== next.id || state?.role !== next.role) guideStep = 0;
+  if (state?.id !== next.id || state?.role !== next.role) {
+    guideStep = 0;
+    chatTurns = [];
+    chatDraft = "";
+    chatError = "";
+    chatPending = null;
+    chatRetry = null;
+  }
   state = next;
   member = state.id;
   sessionStorage.setItem("business", member);
   lang = localStorage.getItem("language") || state.language;
   if (!allowed().includes(page)) page = "overview";
+  try {
+    chatTurns = (await api("assistant/history")).turns;
+  } catch (err) {
+    chatError = err.message;
+  }
   render();
 }
 async function boot() {
@@ -545,6 +561,7 @@ function trend() {
 }
 function overview() {
   return (
+    assistant() +
     metrics() +
     '<div class="cols">' +
     (state.figures
@@ -923,19 +940,120 @@ function billing() {
   );
 }
 function assistant() {
-  return panel(
-    t("Biznes haqida so‘rang", "Спросите о бизнесе"),
-    form(
-      field("question", t("Savol", "Вопрос"), "", "text", true),
-      t("So‘rash", "Спросить"),
-    ) +
-      "<br>" +
-      btn("monthly", t("Oylik hisobot", "Сводка за месяц"), "soft") +
-      '<p class="response">' +
-      esc(speaking) +
-      "</p>",
+  const prompts = [t("Bugun nimadan boshlay?", "С чего начать сегодня?")];
+  if (state.figures)
+    prompts.push(t("Kimning to‘lovi qolgan?", "Кто ещё должен оплатить?"));
+  if (state.topics)
+    prompts.push(t("Mijozlar nimani so‘rayapti?", "Что спрашивают клиенты?"));
+  const messages = chatTurns
+    .map(
+      (turn) =>
+        '<div class="chatMessage chatUser"><small>' +
+        t("Siz", "Вы") +
+        "</small><p>" +
+        esc(turn.question) +
+        '</p></div><div class="chatMessage"><small>' +
+        (turn.source === "ai"
+          ? t("AI yordamchi", "AI-помощник")
+          : t("Do‘kon yozuvlari", "По записям магазина")) +
+        "</small><p>" +
+        esc(turn.answer) +
+        "</p></div>",
+    )
+    .join("");
+  return (
+    '<section class="panel assistantPanel"><div class="head"><h2>' +
+    t("Shaxsiy yordamchi", "Личный помощник") +
+    "</h2>" +
+    (state.figures
+      ? btn("monthly", t("Oylik xulosa", "Сводка за месяц"), "soft")
+      : "") +
+    '</div><div class="chatLog" role="log" aria-label="' +
+    t("Suhbat tarixi", "История разговора") +
+    '">' +
+    (messages ||
+      '<p class="blank">' +
+        t(
+          "Biznesni birga tahlil qilamiz. Savol bering — mahsulotlar va yozuvlardan boshlaymiz.",
+          "Давай разберём твой бизнес. Задай вопрос — начнём с товаров и записей магазина.",
+        ) +
+        "</p>") +
+    (chatPending
+      ? '<div class="chatMessage chatUser"><p>' +
+        esc(chatPending.question) +
+        '</p></div><p role="status">' +
+        t("Javob tayyorlanmoqda…", "Разбираюсь в данных…") +
+        "</p>"
+      : "") +
+    '</div><div class="actions">' +
+    prompts.map((q) => btn("chatPrompt", q, "textbtn", q)).join("") +
+    '</div><form class="stack" data-chat><label>' +
+    t("Savol", "Вопрос") +
+    '<textarea name="question" required maxlength="2000" rows="2" ' +
+    (chatPending ? "readonly" : "") +
+    ">" +
+    esc(chatDraft) +
+    '</textarea></label><p class="error" role="alert">' +
+    esc(chatError) +
+    '</p><button type="submit" class="button" ' +
+    (chatPending ? "disabled" : "") +
+    ">" +
+    t("Yuborish", "Отправить") +
+    "</button></form></section>"
   );
 }
+async function sendChat(question, monthly = false) {
+  if (chatPending || !question.trim()) return;
+  chatDraft = question;
+  chatError = "";
+  const request =
+    chatRetry?.question === question && chatRetry.monthly === monthly
+      ? chatRetry
+      : {
+          question,
+          request_id: crypto.randomUUID(),
+          language: lang,
+          monthly,
+        };
+  chatPending = request;
+  chatRetry = request;
+  const workspace = member,
+    role = state.role;
+  render();
+  try {
+    const { monthly: period, ...body } = request;
+    const result = await api(
+      "assistant" + (period ? "?monthly=true" : ""),
+      "POST",
+      body,
+    );
+    if (member !== workspace || state?.role !== role || chatPending !== request)
+      return;
+    chatTurns.push({
+      question,
+      answer: result.text,
+      source: result.source,
+      request_id: request.request_id,
+    });
+    chatDraft = "";
+    chatRetry = null;
+  } catch (err) {
+    if (chatPending === request)
+      chatError =
+        err.status === 503
+          ? t(
+              "AI xizmati hozir javob bermadi. Qayta urinib ko‘ring.",
+              "AI-сервис сейчас не ответил. Нажми «Отправить», чтобы повторить.",
+            )
+          : err.message;
+  } finally {
+    if (chatPending === request) {
+      chatPending = null;
+      if (state && ["overview", "assistant"].includes(page)) render();
+    }
+  }
+}
+
 function guideSteps() {
   const steps = [
     [
@@ -1087,6 +1205,17 @@ function render() {
     guide() +
     body +
     "</main></div>";
+  const log = root.querySelector(".chatLog");
+  if (log) log.scrollTop = log.scrollHeight;
+  root.querySelector("[data-chat] textarea")?.addEventListener("input", (e) => {
+    chatDraft = e.target.value;
+  });
+  if (chatPending)
+    root
+      .querySelectorAll('[data-act="monthly"], [data-act="chatPrompt"]')
+      .forEach((b) => {
+        b.disabled = true;
+      });
 }
 function editProduct(id) {
   const p = state.products.find((p) => p.id === id) || {},
@@ -1213,41 +1342,6 @@ function entry(kind, r = null) {
         verified: !!o.verified,
       }),
   );
-}
-function askResult(res) {
-  if (res.text) return res.text;
-  const d = res.records,
-    f = d.finances,
-    lines = [t("Saqlangan ma’lumotlar asosida", "По сохранённым данным")];
-  if (f) {
-    lines.push(
-      t("Daromad", "Доход") + " · " + money(f.income),
-      t("Xarajat", "Расход") + " · " + money(f.expense),
-      t("Qoldiq", "Остаток") + " · " + money(f.outstanding),
-    );
-    for (const o of f.due)
-      lines.push(
-        o.customer + " · " + money(o.balance) + " · " + (o.due || "—"),
-      );
-    for (const c of f.expenses) lines.push(c.category + " · " + money(c.total));
-  }
-  if (d.monthly_cash_flow)
-    for (const m of d.monthly_cash_flow)
-      lines.push(m.month + " · " + money(m.net));
-  if (d.topics?.length) {
-    const r = d.topics[0];
-    lines.push(
-      t("Post mavzusi", "Тема публикации") +
-        " · " +
-        topicName(r.topic) +
-        " " +
-        r.product +
-        " (" +
-        r.count +
-        ")",
-    );
-  }
-  return lines.join("\n");
 }
 const actions = {
   guideDone: () => {
@@ -1453,17 +1547,12 @@ const actions = {
     await api("invoices/" + id + "/simulate", "POST");
     await loadState();
   },
-  monthly: async () => {
-    speaking = askResult(
-      await api("assistant?monthly=true", "POST", {
-        question: t(
-          "Oylik xulosa va tavsiyalar",
-          "Итоги месяца и рекомендации",
-        ),
-      }),
-    );
-    render();
-  },
+  chatPrompt: (question) => sendChat(question),
+  monthly: () =>
+    sendChat(
+      t("Oylik xulosa va tavsiyalar", "Итоги месяца и рекомендации"),
+      true,
+    ),
   invite: () =>
     modalForm(
       t("Xodimni taklif qilish", "Пригласить сотрудника"),
@@ -1605,13 +1694,12 @@ document.addEventListener("submit", async (e) => {
       member = r.id;
       localStorage.setItem("language", o.language);
       await boot();
+    } else if (f.hasAttribute("data-chat")) {
+      await sendChat(o.question);
     } else if (page === "inbox") {
       const r = await api("demo-message", "POST", o);
       simulation = r.reply || t("Egasiga yuborildi", "Передано владельцу");
       await loadState();
-    } else if (page === "assistant") {
-      speaking = askResult(await api("assistant", "POST", o));
-      render();
     }
   } catch (err) {
     error.textContent = err.message;
