@@ -1470,7 +1470,11 @@ function render() {
       ],
       280,
     );
-  if (openingMenu && innerWidth <= 850) {
+  if (
+    openingMenu &&
+    innerWidth <= 850 &&
+    localStorage.getItem(guideKey()) === "done"
+  ) {
     motion(
       root.querySelector(".sidebar"),
       [{ transform: "translateX(-105%)" }, { transform: "translateX(0)" }],
