@@ -172,6 +172,32 @@ async def openai(path, body):
                 raise HTTPException(
                     503, "AI provider credentials or model access need attention"
                 )
+            if (
+                r.status_code == 404
+                and urlsplit(base).hostname == "generativelanguage.googleapis.com"
+            ):
+                models = await client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    headers={"x-goog-api-key": key},
+                )
+                if models.is_success:
+                    names = [
+                        m.get("name", "").removeprefix("models/")
+                        for m in models.json().get("models", [])
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                    ]
+                    logging.warning(
+                        "Gemini available text models: %s",
+                        ",".join(
+                            name
+                            for name in names
+                            if name.startswith("gemini-") and "flash" in name
+                        )[:800],
+                    )
+                else:
+                    logging.warning(
+                        "Gemini model discovery HTTP %s", models.status_code
+                    )
             if r.status_code == 404:
                 raise HTTPException(
                     503, "Configured AI model or endpoint was not found"
