@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import os
 import textwrap
 from datetime import date
@@ -150,8 +151,19 @@ async def openai(path, body):
             )
             if r.is_success:
                 return r.json()
-        except httpx.HTTPError:
-            pass
+            logging.warning("AI provider HTTP %s for %s", r.status_code, path)
+            if r.status_code == 429:
+                raise HTTPException(503, "AI provider quota or rate limit reached")
+            if r.status_code in (401, 403):
+                raise HTTPException(
+                    503, "AI provider credentials or model access need attention"
+                )
+            if r.status_code == 404:
+                raise HTTPException(
+                    503, "Configured AI model or endpoint was not found"
+                )
+        except httpx.HTTPError as error:
+            logging.warning("AI provider network error: %s", type(error).__name__)
     raise HTTPException(503, "AI service unavailable")
 
 
