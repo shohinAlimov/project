@@ -647,3 +647,7 @@ button:hover {
 .statsTable th {
   font-weight: 600;
 }
+.main,
+.panel {
+  min-width: 0;
+}
