@@ -1090,3 +1090,81 @@ button {
     max-height: none;
   }
 }
+
+/* Short, composited transitions keep controls responsive on touch screens. */
+:root {
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+button,
+.button,
+input,
+textarea,
+select {
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease,
+    transform 140ms var(--motion-ease);
+}
+button:active,
+a.button:active {
+  transform: scale(0.97);
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--oysha-plum);
+  box-shadow: 0 0 0 3px #3c083f12;
+}
+.chatLauncher {
+  transition:
+    transform 180ms var(--motion-ease),
+    box-shadow 180ms ease;
+}
+.entrySide,
+.sheet {
+  animation: oysha-enter 320ms var(--motion-ease);
+}
+.chatWindow[open]::backdrop,
+#dialog[open]::backdrop {
+  animation: oysha-dim 220ms ease;
+}
+@keyframes oysha-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes oysha-dim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .chatLauncher:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 34px #3c083f40;
+  }
+  .button:hover,
+  .soft:hover {
+    box-shadow: 0 4px 12px #3c083f12;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

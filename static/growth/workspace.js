@@ -21,6 +21,42 @@ let signup = false,
   simulation = "",
   inviteLink = "",
   guideStep = 0;
+let lastView = "",
+  lastChat = false,
+  lastMenu = false,
+  lastTurns = 0;
+let chatClosing = false,
+  menuClosing = false,
+  dialogClosing = false;
+const reducedMotion = () =>
+  matchMedia("(prefers-reduced-motion: reduce)").matches;
+function motion(element, frames, duration = 220) {
+  if (!element || reducedMotion()) return Promise.resolve();
+  return element
+    .animate(frames, {
+      duration,
+      easing: "cubic-bezier(.22,1,.36,1)",
+    })
+    .finished.catch(() => {});
+}
+async function exitMenu() {
+  if (!menuOpen || menuClosing) return;
+  menuClosing = true;
+  await Promise.all([
+    motion(
+      root.querySelector(".sidebar"),
+      [{ transform: "translateX(0)" }, { transform: "translateX(-105%)" }],
+      180,
+    ),
+    motion(
+      root.querySelector(".menuBackdrop"),
+      [{ opacity: 1 }, { opacity: 0 }],
+      180,
+    ),
+  ]);
+  menuOpen = false;
+  menuClosing = false;
+}
 const t = (uz, ru) => (lang === "ru" ? ru : uz);
 const esc = (v) =>
   String(v ?? "").replace(
@@ -197,10 +233,27 @@ async function api(path, method = "GET", data = null, retry = true) {
 function modalForm(title, content, action, label) {
   modal.innerHTML = "<h2>" + esc(title) + "</h2>" + form(content, label);
   formAction = action;
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) {
+    dialog.showModal();
+    motion(dialog, [
+      { opacity: 0, transform: "translateY(14px) scale(.98)" },
+      { opacity: 1, transform: "none" },
+    ]);
+  }
 }
-function close() {
+async function close() {
+  if (dialogClosing || !dialog.open) return;
+  dialogClosing = true;
+  await motion(
+    dialog,
+    [
+      { opacity: 1, transform: "none" },
+      { opacity: 0, transform: "translateY(10px) scale(.99)" },
+    ],
+    160,
+  );
   dialog.close();
+  dialogClosing = false;
   formAction = null;
   requestAnimationFrame(showTour);
 }
@@ -240,6 +293,10 @@ function confirmationText() {
 }
 function authPage() {
   state = null;
+  lastView = "";
+  lastChat = false;
+  lastMenu = false;
+  lastTurns = 0;
   document.querySelector(".tourLayer")?.remove();
   document.body.classList.remove("overlayOpen");
   chatOpen = false;
@@ -1261,6 +1318,20 @@ window.addEventListener(
   { passive: true },
 );
 function render() {
+  const previousLog = root.querySelector(".chatLog");
+  const oldScroll = previousLog?.scrollTop || 0;
+  const atBottom =
+    !previousLog ||
+    previousLog.scrollHeight - oldScroll - previousLog.clientHeight < 60;
+  const view = member + ":" + page;
+  const pageChanged = lastView !== view;
+  const openingChat = chatOpen && !lastChat;
+  const openingMenu = menuOpen && !lastMenu;
+  const newTurn = chatTurns.length > lastTurns;
+  lastView = view;
+  lastChat = chatOpen;
+  lastMenu = menuOpen;
+  lastTurns = chatTurns.length;
   document.documentElement.lang = lang;
   const p = pages();
   const body = {
@@ -1378,7 +1449,60 @@ function render() {
     b.setAttribute("aria-expanded", String(menuOpen));
   });
   const log = root.querySelector(".chatLog");
-  if (log) log.scrollTop = log.scrollHeight;
+  if (log) {
+    log.scrollTop = oldScroll;
+    if (openingChat || atBottom)
+      log.scrollTo({
+        top: log.scrollHeight,
+        behavior: openingChat || reducedMotion() ? "instant" : "smooth",
+      });
+  }
+  if (openingChat)
+    motion(
+      chatWindow,
+      [
+        { opacity: 0, transform: "translateY(24px) scale(.97)" },
+        { opacity: 1, transform: "none" },
+      ],
+      280,
+    );
+  if (openingMenu && innerWidth <= 850) {
+    motion(
+      root.querySelector(".sidebar"),
+      [{ transform: "translateX(-105%)" }, { transform: "translateX(0)" }],
+      260,
+    );
+    motion(root.querySelector(".menuBackdrop"), [
+      { opacity: 0 },
+      { opacity: 1 },
+    ]);
+  }
+  if (pageChanged && localStorage.getItem(guideKey()) === "done") {
+    root
+      .querySelectorAll(".main > .panel, .main > .cols, .main > .cards")
+      .forEach((el, i) => {
+        motion(
+          el,
+          [
+            { opacity: 0, transform: "translateY(10px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          240 + Math.min(i, 3) * 35,
+        );
+      });
+  }
+  if (newTurn && chatOpen && !openingChat)
+    root.querySelectorAll(".chatMessage").forEach((el, i, list) => {
+      if (i >= list.length - 2)
+        motion(
+          el,
+          [
+            { opacity: 0, transform: "translateY(6px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          200,
+        );
+    });
   root.querySelector("[data-chat] textarea")?.addEventListener("input", (e) => {
     chatDraft = e.target.value;
   });
@@ -1522,9 +1646,20 @@ const actions = {
     menuOpen = false;
     render();
   },
-  chatClose: () => {
+  chatClose: async () => {
+    if (chatClosing) return;
+    chatClosing = true;
+    await motion(
+      root.querySelector("#chatWindow"),
+      [
+        { opacity: 1, transform: "none" },
+        { opacity: 0, transform: "translateY(18px) scale(.98)" },
+      ],
+      180,
+    );
     chatOpen = false;
-    render();
+    chatClosing = false;
+    if (state) render();
   },
   refreshData: () => loadState(),
   telegramUpload: async () => {
@@ -1593,6 +1728,8 @@ const actions = {
     else authPage();
   },
   nav: async (id) => {
+    if (menuClosing) return;
+    await exitMenu();
     if (id === "assistant") {
       chatOpen = true;
       menuOpen = false;
@@ -1605,7 +1742,9 @@ const actions = {
     window.scrollTo(0, 0);
   },
   menu: async () => {
-    menuOpen = !menuOpen;
+    if (menuClosing) return;
+    if (menuOpen) await exitMenu();
+    else menuOpen = true;
     render();
   },
   resendConfirmation: async () => {
@@ -1898,7 +2037,7 @@ document.addEventListener("submit", async (e) => {
       await sendChat(o.question);
     } else if (dialog.contains(f)) {
       await formAction(o, fd);
-      close();
+      await close();
       await loadState();
     } else if (f.closest(".entry")) {
       const res = await api("auth/" + (signup ? "signup" : "login"), "POST", o);
@@ -1934,8 +2073,7 @@ boot().catch((err) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && menuOpen && state) {
-    menuOpen = false;
-    render();
+    actions.menu();
   } else if (e.key === "Escape" && document.querySelector(".tourLayer"))
     actions.guideDone();
 });
@@ -1992,4 +2130,9 @@ document.addEventListener("visibilitychange", () => {
     !chatOpen
   )
     loadState().catch((err) => notice(err.message));
+});
+
+dialog.addEventListener("cancel", (e) => {
+  e.preventDefault();
+  close();
 });
